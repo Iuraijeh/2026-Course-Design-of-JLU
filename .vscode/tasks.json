@@ -1,0 +1,51 @@
+{
+  "version": "2.0.0",
+  "tasks": [
+    {
+      "label": "构建 C++（test-.exe）",
+      "type": "process",
+      "command": "C:\\Windows\\System32\\WindowsPowerShell\\v1.0\\powershell.exe",
+      "args": [
+        "-NoProfile",
+        "-Command",
+        "$env:Path = 'C:\\mingw64\\bin;' + $env:Path; $sources = @(Get-ChildItem -Filter '*.cpp' -File | Sort-Object Name | ForEach-Object { $_.FullName }); if ($sources.Count -eq 0) { throw '没有 C++ 源文件' }; & 'C:\\mingw64\\bin\\g++.exe' -std=c++17 -g -O0 -pthread $sources -o 'test-.exe' -lws2_32; exit $LASTEXITCODE"
+      ],
+      "options": { "cwd": "${workspaceFolder}" },
+      "group": { "kind": "build", "isDefault": true },
+      "problemMatcher": "$gcc",
+      "presentation": { "reveal": "always", "panel": "shared", "clear": true }
+    },
+    {
+      "label": "运行 C++ 控制台",
+      "type": "process",
+      "command": "${workspaceFolder}\\test-.exe",
+      "dependsOn": "构建 C++（test-.exe）",
+      "dependsOrder": "sequence",
+      "options": { "cwd": "${workspaceFolder}" },
+      "problemMatcher": [],
+      "presentation": { "reveal": "always", "focus": true, "panel": "dedicated" }
+    },
+    {
+      "label": "运行网页服务",
+      "type": "process",
+      "command": "node",
+      "args": ["web/server.js"],
+      "options": {
+        "cwd": "${workspaceFolder}",
+        "env": { "MICROX_TCP_PORT": "9528" }
+      },
+      "problemMatcher": [],
+      "presentation": { "reveal": "always", "focus": true, "panel": "dedicated" }
+    },
+    {
+      "label": "测试网页服务",
+      "type": "process",
+      "command": "node",
+      "args": ["--test", "web/test.js"],
+      "options": { "cwd": "${workspaceFolder}" },
+      "group": "test",
+      "problemMatcher": [],
+      "presentation": { "reveal": "always", "panel": "shared", "clear": true }
+    }
+  ]
+}

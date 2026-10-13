@@ -1,0 +1,45 @@
+{
+  "version": "0.2.0",
+  "configurations": [
+    {
+      "name": "C++ 控制台：编译并调试",
+      "type": "cppdbg",
+      "request": "launch",
+      "program": "${workspaceFolder}\\test-.exe",
+      "args": [],
+      "stopAtEntry": false,
+      "cwd": "${workspaceFolder}",
+      "environment": [],
+      "externalConsole": false,
+      "MIMode": "gdb",
+      "miDebuggerPath": "C:\\mingw64\\bin\\gdb.exe",
+      "setupCommands": [
+        {
+          "description": "启用 GDB 容器显示",
+          "text": "-enable-pretty-printing",
+          "ignoreFailures": true
+        }
+      ],
+      "preLaunchTask": "构建 C++（test-.exe）"
+    },
+    {
+      "name": "网页：调试后端和前端",
+      "type": "node",
+      "request": "launch",
+      "program": "${workspaceFolder}\\web\\server.js",
+      "cwd": "${workspaceFolder}",
+      "runtimeExecutable": "node",
+      "console": "internalConsole",
+      "env": {
+        "MICROX_WEB_PORT": "3000",
+        "MICROX_TCP_PORT": "9528"
+      },
+      "serverReadyAction": {
+        "action": "debugWithEdge",
+        "pattern": "127\\.0\\.0\\.1:([0-9]+)",
+        "uriFormat": "http://127.0.0.1:%s",
+        "webRoot": "${workspaceFolder}\\web\\public"
+      }
+    }
+  ]
+}
