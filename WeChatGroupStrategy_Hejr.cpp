@@ -25,6 +25,13 @@ bool WeChatGroupStrategy_Hejr::hasAdminSystem()
 }
 
 // 策略名称
+bool WeChatGroupStrategy_Hejr::shouldDissolveOnExit(bool, size_t memberCount)
+{
+    // <= 同时兼容旧版预设群、踢人后仅剩群主的情况。
+    return memberCount <= 2;
+}
+
+// 策略名称
 string WeChatGroupStrategy_Hejr::getStrategyName()
 {
     return "微信群模式";

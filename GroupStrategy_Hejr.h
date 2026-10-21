@@ -2,6 +2,7 @@
 #define GROUPSTRATEGY_HEJR_H
 
 #include <string>
+#include <cstddef>
 using namespace std;
 
 // ============================================================
@@ -31,6 +32,9 @@ public:
 
     // 是否拥有群主之外的管理员制度（QQ群 true，微信群 false）
     virtual bool hasAdminSystem() = 0;
+
+    // 退群是否解散：QQ群主退群解散；微信群剩两人时任何人退群解散。
+    virtual bool shouldDissolveOnExit(bool isOwner, size_t memberCount) = 0;
 
     // 获取策略名称（如 "QQ群模式" / "微信群模式"）
     virtual string getStrategyName() = 0;

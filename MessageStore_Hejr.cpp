@@ -106,14 +106,17 @@ bool MessageStore_Hejr::append(const MessageRecord_Hejr& message)
 
 vector<MessageRecord_Hejr> MessageStore_Hejr::conversation(const string& account,
                                                               const string& kind,
-                                                              const string& target)
+                                                              const string& target,
+                                                              const string& legacyGroupId)
 {
     vector<MessageRecord_Hejr> result;
     vector<MessageRecord_Hejr> all = readAll();
     for (size_t i = 0; i < all.size(); ++i)
     {
         const MessageRecord_Hejr& message = all[i];
-        if (kind == "group" && message.kind == "group" && message.target == target)
+        if (kind == "group" && message.kind == "group" &&
+            (message.target == target ||
+             (!legacyGroupId.empty() && message.target == legacyGroupId)))
             result.push_back(message);
         else if (kind == "direct" && message.kind == "direct" &&
                  ((message.sender == account && message.target == target) ||

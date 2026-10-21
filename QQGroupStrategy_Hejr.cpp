@@ -25,6 +25,12 @@ bool QQGroupStrategy_Hejr::hasAdminSystem()
 }
 
 // 策略名称
+bool QQGroupStrategy_Hejr::shouldDissolveOnExit(bool isOwner, size_t)
+{
+    return isOwner;
+}
+
+// 策略名称
 string QQGroupStrategy_Hejr::getStrategyName()
 {
     return "QQ群模式";

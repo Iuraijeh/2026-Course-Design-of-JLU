@@ -41,6 +41,7 @@ private:
 
     // 安全读取整数（防止输入字母导致 cin 死循环）
     int readInt() const;
+    string readGroupKey() const; // 先选服务，再输入群号
 
     // 首次运行初始化测试数据
     void initData();
@@ -48,6 +49,7 @@ private:
     // ---------- 子菜单 ----------
     void friendMenu();         // 好友管理
     void groupMenu();          // 群管理
+    void createGroupFromFriends(); // 从对应服务好友中选择初始成员
     void serviceMenu();        // 开通管理
     void accountMenu();        // 账号设置
     void crossServiceMenu();   // 跨服务好友
@@ -68,15 +70,18 @@ public:
     ~Platform_Hejr();
 
     // ---------- 登录 / 登出 ----------
-    // 一次统一认证；任一已开通服务确认后，其他服务自动登录。
-    bool login(string userId, string password);
+    // 从指定已开通服务登录；确认一次后，其他已开通服务自动登录。
+    bool login(string userId, string password, string entryService);
 
     // 注册：平台账号号唯一且不可修改，第二列为昵称。
     bool registerUser(string accountNumber, string password,
-                      string passwordConfirmation, string userId);
+                      string passwordConfirmation, string userId,
+                      string birthday, string location);
 
     // 修改当前昵称（平台账号号始终不变）。
     bool changeUserId(string newUserId);
+    bool changeBirthday(string birthday);
+    bool changeLocation(string location);
 
     bool changeWeChatId(string newWeChatId);
     bool bindWeChatToCurrentQQ();

@@ -9,6 +9,7 @@
 #include <sstream>
 #include <iomanip>
 #include <ctime>
+#include <algorithm>
 using namespace std;
 
 static string normalizeAccountNumber(string account)
@@ -71,6 +72,41 @@ static string currentLocalMonth()
     return month.str();
 }
 
+static string currentLocalDate()
+{
+    time_t now = time(NULL);
+    tm localTime;
+#ifdef _WIN32
+    localtime_s(&localTime, &now);
+#else
+    localtime_r(&now, &localTime);
+#endif
+    char buffer[11];
+    strftime(buffer, sizeof(buffer), "%Y-%m-%d", &localTime);
+    return buffer;
+}
+
+static bool isValidBirthday(const string& value)
+{
+    if (value.empty()) return true;
+    if (value.size() != 10 || value[4] != '-' || value[7] != '-') return false;
+    for (size_t i = 0; i < value.size(); ++i)
+        if (i != 4 && i != 7 && !isdigit((unsigned char)value[i])) return false;
+    int year = stoi(value.substr(0, 4));
+    int month = stoi(value.substr(5, 2));
+    int day = stoi(value.substr(8, 2));
+    if (year < 1 || month < 1 || month > 12) return false;
+    int days[] = {31, 28, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31};
+    if (month == 2 && (year % 400 == 0 || (year % 4 == 0 && year % 100 != 0)))
+        days[1] = 29;
+    return day >= 1 && day <= days[month - 1] && value <= currentLocalDate();
+}
+
+static bool isValidLocation(const string& value)
+{
+    return value.size() <= 200 && value.find_first_of("|\r\n") == string::npos;
+}
+
 // ============================================================
 // 辅助函数：安全读取整数
 // 防止用户输入字母导致 cin 进入错误状态死循环
@@ -86,6 +122,21 @@ int Platform_Hejr::readInt() const
     }
     cin.ignore(numeric_limits<streamsize>::max(), '\n');
     return n;
+}
+
+string Platform_Hejr::readGroupKey() const
+{
+    cout << "选择群所属服务: 1.QQ  2.WeChat: ";
+    int choice = readInt();
+    if (choice != 1 && choice != 2)
+    {
+        cout << "无效服务。" << endl;
+        return "";
+    }
+    string groupId;
+    cout << "请输入群号: ";
+    getline(cin, groupId);
+    return (choice == 1 ? "QQ:" : "WeChat:") + groupId;
 }
 
 // ============================================================
@@ -183,27 +234,51 @@ void Platform_Hejr::initData()
     cout << "[平台] 测试数据初始化完成（3 个用户、好友关系）。" << endl;
 }
 
-// 让用户档案中的群号和群对象成员表保持一致，兼容旧数据文件。
+// 以群成员表为准同步用户档案，并将旧版纯数字群号迁移为服务:群号。
 void Platform_Hejr::syncUserGroupsFromStorage()
 {
     vector<User_Hejr>& users = userContainer->getAllUsers();
+    bool changed = false;
     for (size_t i = 0; i < users.size(); ++i)
     {
         vector<string> gids = users[i].getGroupIds();
         for (size_t j = 0; j < gids.size(); ++j)
         {
-            Group_Hejr* group = groupContainer->findByGroupId(gids[j]);
-            if (group != NULL) group->loadMember(users[i].getAccountNumber());
+            if (gids[j].find(':') == string::npos)
+            {
+                users[i].removeGroupId(gids[j]);
+                changed = true;
+            }
+            else
+            {
+                Group_Hejr* group = groupContainer->findByGroupId(gids[j]);
+                if (group == NULL || !group->isMember(users[i].getAccountNumber()))
+                {
+                    users[i].removeGroupId(gids[j]);
+                    changed = true;
+                }
+            }
         }
     }
 
-    // 群主必然属于该群；同时将迁移后的预设群写回其用户档案。
+    // 群主和所有已保存的成员都取得带服务前缀的群号。
     vector<Group_Hejr*> groups = groupContainer->getAllGroups();
     for (size_t i = 0; i < groups.size(); ++i)
     {
-        User_Hejr* owner = userContainer->findUserById(groups[i]->getOwnerId());
-        if (owner != NULL) owner->addGroupId(groups[i]->getGroupId());
+        vector<string> members = groups[i]->getMembers();
+        for (size_t j = 0; j < members.size(); ++j)
+        {
+            User_Hejr* user = userContainer->findUserById(members[j]);
+            if (user == NULL) continue;
+            vector<string> ids = user->getGroupIds();
+            if (find(ids.begin(), ids.end(), groups[i]->getStorageId()) == ids.end())
+            {
+                user->addGroupId(groups[i]->getStorageId());
+                changed = true;
+            }
+        }
     }
+    if (changed) userContainer->save();
 }
 
 static bool storedGroupMember(const string& account, const string& groupId)
@@ -319,7 +394,7 @@ bool Platform_Hejr::checkLogin() const
 // ============================================================
 // 登录：一次认证，所有已开通服务自动登录
 // ============================================================
-bool Platform_Hejr::login(string userId, string password)
+bool Platform_Hejr::login(string userId, string password, string entryService)
 {
     userId = normalizeAccountNumber(userId);
     userContainer->load("users.txt");
@@ -343,6 +418,23 @@ bool Platform_Hejr::login(string userId, string password)
     {
         cout << "[平台] 用户 " << userId << " 尚未开通任何服务。" << endl;
         return false;
+    }
+    if (find(opened.begin(), opened.end(), entryService) == opened.end())
+    {
+        cout << "[平台] 该账号尚未开通 " << entryService << "，请选择已开通服务登录。" << endl;
+        return false;
+    }
+
+    if (opened.size() > 1)
+    {
+        cout << "[平台] 已通过 " << entryService << " 身份验证。确认联动登录其余已开通服务？(Y/N): ";
+        string confirmation;
+        getline(cin, confirmation);
+        if (confirmation != "Y" && confirmation != "y")
+        {
+            cout << "[平台] 已取消本次登录。" << endl;
+            return false;
+        }
     }
 
     // 若已有登录会话，先登出
@@ -383,8 +475,8 @@ bool Platform_Hejr::login(string userId, string password)
     }
     cout << "[平台] 好友数据已同步到对应服务。" << endl;
 
-    // 使用任一已开通入口完成一次认证；不再要求选择 QQ、微信或微博。
-    ServiceBase_Hejr* svc = serviceContainer->getService(opened[0]);
+    // 用户选定的服务建立首个会话，其余服务在一次确认后联动登录。
+    ServiceBase_Hejr* svc = serviceContainer->getService(entryService);
     if (svc == NULL || !svc->login(password))
     {
         cout << "[平台] 登录失败。" << endl;
@@ -392,7 +484,7 @@ bool Platform_Hejr::login(string userId, string password)
         return false;
     }
 
-    cout << "[平台] 统一认证成功，正在联动其它已开通服务..." << endl;
+    cout << "[平台] " << entryService << " 登录成功，正在联动其它已开通服务..." << endl;
 
     // 自动登录其它已开通服务
     vector<ServiceBase_Hejr*> allSvcs = serviceContainer->getAllServices();
@@ -402,7 +494,7 @@ bool Platform_Hejr::login(string userId, string password)
         {
             allSvcs[i]->autoLogin();
             cout << "[平台] " << allSvcs[i]->getServiceType()
-                 << " 已简单确认并自动登录。" << endl;
+                 << " 已自动登录。" << endl;
         }
     }
 
@@ -414,7 +506,8 @@ bool Platform_Hejr::login(string userId, string password)
 }
 
 bool Platform_Hejr::registerUser(string accountNumber, string password,
-                                 string passwordConfirmation, string userId)
+                                 string passwordConfirmation, string userId,
+                                 string birthday, string location)
 {
     accountNumber = normalizeAccountNumber(accountNumber);
     if (!isValidAccountNumber(accountNumber))
@@ -448,7 +541,18 @@ bool Platform_Hejr::registerUser(string accountNumber, string password,
         return false;
     }
 
-    User_Hejr user(accountNumber, userId, "1970-01-01", "2026-01-01", "");
+    if (!isValidBirthday(birthday))
+    {
+        cout << "[注册] 出生日期须为不晚于今天的有效 YYYY-MM-DD，或留空。" << endl;
+        return false;
+    }
+    if (!isValidLocation(location))
+    {
+        cout << "[注册] 所在地不能包含分隔符或换行，最多 200 字节。" << endl;
+        return false;
+    }
+
+    User_Hejr user(accountNumber, userId, birthday, currentLocalDate(), location);
     user.changePassword(password);
     // 统一微X账号注册后默认开通三个入口。
     user.addService("QQ");
@@ -472,6 +576,34 @@ bool Platform_Hejr::changeUserId(string newUserId)
     userContainer->save();
     cout << "[账号设置] 昵称已修改为 " << newUserId
          << "，账号号保持不变。" << endl;
+    return true;
+}
+
+bool Platform_Hejr::changeBirthday(string birthday)
+{
+    if (!checkLogin()) return false;
+    if (!isValidBirthday(birthday))
+    {
+        cout << "[账号设置] 出生日期须为不晚于今天的有效 YYYY-MM-DD，或留空。" << endl;
+        return false;
+    }
+    currentUser->setBirthday(birthday);
+    userContainer->save();
+    cout << "[账号设置] 出生日期已保存。" << endl;
+    return true;
+}
+
+bool Platform_Hejr::changeLocation(string location)
+{
+    if (!checkLogin()) return false;
+    if (!isValidLocation(location))
+    {
+        cout << "[账号设置] 所在地不能包含分隔符或换行，最多 200 字节。" << endl;
+        return false;
+    }
+    currentUser->setLocation(location);
+    userContainer->save();
+    cout << "[账号设置] 所在地已保存。" << endl;
     return true;
 }
 
@@ -753,6 +885,7 @@ void Platform_Hejr::run()
     {
         userContainer->load("users.txt");
         string accountNumber, password, passwordConfirmation, userId;
+        string birthday, location;
         cout << "\n========================================" << endl;
         cout << "          微X平台登录 / 注册" << endl;
         cout << "========================================" << endl;
@@ -772,7 +905,17 @@ void Platform_Hejr::run()
             getline(cin, accountNumber);
             cout << "请输入密码: ";
             getline(cin, password);
-            if (!login(accountNumber, password))
+            cout << "选择登录服务: 1.QQ  2.WeChat  3.Weibo: ";
+            int serviceChoice = readInt();
+            string entryService = serviceChoice == 1 ? "QQ" :
+                                  serviceChoice == 2 ? "WeChat" :
+                                  serviceChoice == 3 ? "Weibo" : "";
+            if (entryService.empty())
+            {
+                cout << "无效服务，请重新登录。" << endl;
+                continue;
+            }
+            if (!login(accountNumber, password, entryService))
                 cout << "认证未通过，请重新登录。" << endl;
         }
         else if (action == 2)
@@ -785,7 +928,12 @@ void Platform_Hejr::run()
             getline(cin, passwordConfirmation);
             cout << "请输入昵称: ";
             getline(cin, userId);
-            registerUser(accountNumber, password, passwordConfirmation, userId);
+            cout << "出生日期（YYYY-MM-DD，可留空）: ";
+            getline(cin, birthday);
+            cout << "所在地（可留空）: ";
+            getline(cin, location);
+            registerUser(accountNumber, password, passwordConfirmation,
+                         userId, birthday, location);
         }
         else
             cout << "无效选项，请重新选择。" << endl;
@@ -1023,6 +1171,81 @@ void Platform_Hejr::friendMenu()
 // ============================================================
 // 群管理子菜单
 // ============================================================
+void Platform_Hejr::createGroupFromFriends()
+{
+    cout << "选择建群服务: 1.QQ  2.WeChat: ";
+    int serviceChoice = readInt();
+    if (serviceChoice != 1 && serviceChoice != 2)
+    {
+        cout << "无效服务。" << endl;
+        return;
+    }
+    string service = serviceChoice == 1 ? "QQ" : "WeChat";
+    if (!currentUser->isServiceOpened(service))
+    {
+        cout << "请先开通该服务。" << endl;
+        return;
+    }
+
+    vector<string> candidates;
+    vector<Friend_Hejr>& friends = friendContainer->getAllFriends();
+    cout << "可选择的 " << service << " 好友：" << endl;
+    for (size_t i = 0; i < friends.size(); ++i)
+    {
+        User_Hejr* user = userContainer->findUserById(friends[i].getFriendId());
+        if (!friends[i].hasServiceType(service) || user == NULL ||
+            !user->isServiceOpened(service) ||
+            user->getAccountNumber() == currentUser->getAccountNumber()) continue;
+        candidates.push_back(user->getAccountNumber());
+        cout << "  " << candidates.size() << ". " << user->getNickname()
+             << "（账号号: " << user->getAccountNumber() << "）" << endl;
+    }
+    if (candidates.empty())
+    {
+        cout << "没有可选择的好友，请先添加该服务好友。不能单人建群。" << endl;
+        return;
+    }
+
+    string name, selection;
+    cout << "请输入群名: ";
+    getline(cin, name);
+    cout << "请选择至少一名好友，输入列表序号（多个用空格分隔，留空取消）: ";
+    getline(cin, selection);
+    istringstream input(selection);
+    vector<string> selected;
+    string token;
+    while (input >> token)
+    {
+        istringstream numberInput(token);
+        size_t number;
+        char extra;
+        if (!(numberInput >> number) || (numberInput >> extra) ||
+            number < 1 || number > candidates.size())
+        {
+            cout << "好友序号无效，未创建群聊。" << endl;
+            return;
+        }
+        const string& account = candidates[number - 1];
+        if (find(selected.begin(), selected.end(), account) == selected.end())
+            selected.push_back(account);
+    }
+    if (selected.empty())
+    {
+        cout << "未选择好友，已取消建群。" << endl;
+        return;
+    }
+    Group_Hejr* group = groupContainer->createGroup(
+        service, name, currentUser->getAccountNumber(), selected);
+    if (group == NULL) return;
+    vector<string> members = group->getMembers();
+    for (size_t i = 0; i < members.size(); ++i)
+        userContainer->findUserById(members[i])->addGroupId(group->getStorageId());
+    groupContainer->save("groups.txt");
+    userContainer->save();
+    cout << "建群成功，服务: " << service << "，群号: " << group->getGroupId()
+         << "，群主: " << group->getOwnerId() << "，共 " << members.size() << " 人。" << endl;
+}
+
 void Platform_Hejr::groupMenu()
 {
     if (!checkLogin()) return;
@@ -1040,6 +1263,12 @@ void Platform_Hejr::groupMenu()
         cout << "  6. 挨T（踢人）" << endl;
         cout << "  7. 设置管理员" << endl;
         cout << "  8. 创建临时讨论组" << endl;
+        cout << "  9. 查看临时讨论组及成员" << endl;
+        cout << " 10. 添加讨论组成员（群主/管理员）" << endl;
+        cout << " 11. 移除讨论组成员（群主/管理员）" << endl;
+        cout << " 12. 创建群聊（从好友中选择成员）" << endl;
+        cout << " 13. 转让群主" << endl;
+        cout << " 14. 撤销管理员" << endl;
         cout << "  0. 返回主菜单" << endl;
         cout << "请选择: ";
 
@@ -1052,9 +1281,7 @@ void Platform_Hejr::groupMenu()
             break;
         case 2:
         {
-            string gid;
-            cout << "请输入群号: ";
-            getline(cin, gid);
+            string gid = readGroupKey();
             Group_Hejr* g = groupContainer->findByGroupId(gid);
             if (g) g->listMembers();
             else cout << "群不存在。" << endl;
@@ -1062,57 +1289,60 @@ void Platform_Hejr::groupMenu()
         }
         case 3:
         {
-            string gid;
-            cout << "请输入群号: ";
-            getline(cin, gid);
+            string gid = readGroupKey();
             Group_Hejr* g = groupContainer->findByGroupId(gid);
-            if (g && g->applyJoin(currentUser->getAccountNumber()))
+            if (g == NULL) cout << "群不存在。" << endl;
+            else if (!currentUser->isServiceOpened(g->getServiceType()))
+                cout << "请先开通该群所属服务。" << endl;
+            else if (g->applyJoin(currentUser->getAccountNumber()))
             {
                 currentUser->addGroupId(gid);
                 groupContainer->save("groups.txt");
                 userContainer->save();
             }
-            else cout << "群不存在。" << endl;
             break;
         }
         case 4:
         {
-            string gid, fid;
-            cout << "请输入群号: ";
-            getline(cin, gid);
+            string gid = readGroupKey(), fid;
             cout << "请输入被邀请人的平台账号号: ";
             getline(cin, fid);
             Group_Hejr* g = groupContainer->findByGroupId(gid);
-            if (g && g->inviteJoin(fid, currentUser->getAccountNumber()))
+            User_Hejr* invited = userContainer->findUserById(fid);
+            if (g == NULL) cout << "群不存在。" << endl;
+            else if (invited == NULL || !invited->isServiceOpened(g->getServiceType()))
+                cout << "目标用户不存在或尚未开通该群所属服务。" << endl;
+            else if (g->inviteJoin(invited->getAccountNumber(), currentUser->getAccountNumber()))
             {
-                User_Hejr* invited = userContainer->findUserById(fid);
-                if (invited != NULL) invited->addGroupId(gid);
+                invited->addGroupId(gid);
                 groupContainer->save("groups.txt");
                 userContainer->save();
             }
-            else cout << "群不存在。" << endl;
             break;
         }
         case 5:
         {
-            string gid;
-            cout << "请输入群号: ";
-            getline(cin, gid);
+            string gid = readGroupKey();
             Group_Hejr* g = groupContainer->findByGroupId(gid);
-            if (g && g->quitGroup(currentUser->getAccountNumber()))
+            if (g == NULL) cout << "群不存在。" << endl;
+            else if (g->quitGroup(currentUser->getAccountNumber()))
             {
-                currentUser->removeGroupId(gid);
+                if (g->getMembers().empty())
+                {
+                    // 解散后清除所有用户档案中的群号，避免残留成员关系。
+                    vector<User_Hejr>& users = userContainer->getAllUsers();
+                    for (size_t i = 0; i < users.size(); ++i) users[i].removeGroupId(gid);
+                    groupContainer->removeGroup(gid);
+                }
+                else currentUser->removeGroupId(gid);
                 groupContainer->save("groups.txt");
                 userContainer->save();
             }
-            else cout << "群不存在。" << endl;
             break;
         }
         case 6:
         {
-            string gid, target;
-            cout << "请输入群号: ";
-            getline(cin, gid);
+            string gid = readGroupKey(), target;
             cout << "请输入要踢出的用户账号号: ";
             getline(cin, target);
             Group_Hejr* g = groupContainer->findByGroupId(gid);
@@ -1128,28 +1358,65 @@ void Platform_Hejr::groupMenu()
         }
         case 7:
         {
-            string gid, uid;
-            cout << "请输入群号: ";
-            getline(cin, gid);
+            string gid = readGroupKey(), uid;
             cout << "请输入要设为管理员的用户账号号: ";
             getline(cin, uid);
             Group_Hejr* g = groupContainer->findByGroupId(gid);
-            if (g && g->addAdmin(currentUser->getAccountNumber(), uid))
+            if (g == NULL) cout << "群不存在。" << endl;
+            else if (g->addAdmin(currentUser->getAccountNumber(), uid))
                 groupContainer->save("groups.txt");
-            else cout << "群不存在。" << endl;
             break;
         }
         case 8:
         {
-            string gid, name;
-            cout << "请输入群号: ";
-            getline(cin, gid);
+            string gid = readGroupKey(), name;
             cout << "请输入讨论组名称: ";
             getline(cin, name);
             Group_Hejr* g = groupContainer->findByGroupId(gid);
             if (g && g->createSubgroup(name, currentUser->getAccountNumber()))
                 groupContainer->save("groups.txt");
             else cout << "群不存在。" << endl;
+            break;
+        }
+        case 9:
+        {
+            string gid = readGroupKey();
+            Group_Hejr* g = groupContainer->findByGroupId(gid);
+            if (g != NULL) g->listSubgroups();
+            else cout << "群不存在。" << endl;
+            break;
+        }
+        case 10:
+        case 11:
+        {
+            string gid = readGroupKey(), name, userId;
+            cout << "请输入讨论组名称: ";
+            getline(cin, name);
+            cout << "请输入目标成员账号号: ";
+            getline(cin, userId);
+            Group_Hejr* g = groupContainer->findByGroupId(gid);
+            if (g == NULL) cout << "群不存在。" << endl;
+            else if ((choice == 10 && g->addSubgroupMember(
+                          name, currentUser->getAccountNumber(), userId)) ||
+                     (choice == 11 && g->removeSubgroupMember(
+                          name, currentUser->getAccountNumber(), userId)))
+                groupContainer->save("groups.txt");
+            break;
+        }
+        case 12:
+            createGroupFromFriends();
+            break;
+        case 13:
+        case 14:
+        {
+            string gid = readGroupKey(), target;
+            cout << (choice == 13 ? "请输入新群主的账号号: " : "请输入要撤销管理员的账号号: ");
+            getline(cin, target);
+            Group_Hejr* g = groupContainer->findByGroupId(gid);
+            if (g == NULL) cout << "群不存在。" << endl;
+            else if ((choice == 13 && g->transferOwnership(currentUser->getAccountNumber(), target)) ||
+                     (choice == 14 && g->removeAdmin(currentUser->getAccountNumber(), target)))
+                groupContainer->save("groups.txt");
             break;
         }
         case 0:
@@ -1187,6 +1454,9 @@ void Platform_Hejr::accountMenu()
         cout << "  3. 修改微信账号号（每自然月最多一次）" << endl;
         cout << "  4. 绑定当前登录的 QQ 账号号" << endl;
         cout << "  5. 解除微信与 QQ 的绑定" << endl;
+        cout << "  6. 查看基本信息" << endl;
+        cout << "  7. 修改出生日期" << endl;
+        cout << "  8. 修改所在地" << endl;
         cout << "  0. 返回主菜单" << endl;
         cout << "请选择: ";
 
@@ -1232,6 +1502,25 @@ void Platform_Hejr::accountMenu()
         case 5:
             unbindWeChatQQ();
             break;
+        case 6:
+            currentUser->printInfo();
+            break;
+        case 7:
+        {
+            string birthday;
+            cout << "出生日期（YYYY-MM-DD，留空表示未填写）: ";
+            getline(cin, birthday);
+            changeBirthday(birthday);
+            break;
+        }
+        case 8:
+        {
+            string location;
+            cout << "所在地（留空表示未填写）: ";
+            getline(cin, location);
+            changeLocation(location);
+            break;
+        }
         case 0:
             back = true;
             break;
@@ -1379,17 +1668,13 @@ void Platform_Hejr::groupFeatureMenu()
         {
         case 1:
         {
-            string gid;
-            cout << "请输入群号: ";
-            getline(cin, gid);
+            string gid = readGroupKey();
             showGroupFeature(gid);
             break;
         }
         case 2:
         {
-            string gid, stratType;
-            cout << "请输入群号: ";
-            getline(cin, gid);
+            string gid = readGroupKey(), stratType;
             cout << "选择新模式: 1.QQ群模式  2.微信群模式" << endl;
             cout << "请选择: ";
             int s = readInt();
@@ -1432,9 +1717,14 @@ void Platform_Hejr::chatMenu()
         if (choice == 0) { back = true; continue; }
         if (choice < 1 || choice > 4) { cout << "无效选项。" << endl; continue; }
         string target;
-        cout << (choice <= 2 ? "好友账号: " : "群号: ");
-        getline(cin, target);
+        if (choice <= 2)
+        {
+            cout << "好友账号: ";
+            getline(cin, target);
+        }
+        else target = readGroupKey();
         const string account = currentUser->getAccountNumber();
+        string legacyGroupId;
         if (choice <= 2)
         {
             if (userContainer->findUserById(target) == NULL)
@@ -1447,12 +1737,13 @@ void Platform_Hejr::chatMenu()
             Group_Hejr* group = groupContainer->findByGroupId(target);
             if (group == NULL || !group->isMember(account))
             { cout << "只有群成员可以查看和发送群消息。" << endl; continue; }
+            legacyGroupId = group->getLegacyGroupId();
         }
         const string kind = choice <= 2 ? "direct" : "group";
         if (choice == 1 || choice == 3)
         {
             vector<MessageRecord_Hejr> messages =
-                MessageStore_Hejr::conversation(account, kind, target);
+                MessageStore_Hejr::conversation(account, kind, target, legacyGroupId);
             cout << "共 " << messages.size() << " 条历史消息：" << endl;
             for (size_t i = 0; i < messages.size(); ++i)
                 cout << "[" << MessageStore_Hejr::formatTime(messages[i].at) << "] "

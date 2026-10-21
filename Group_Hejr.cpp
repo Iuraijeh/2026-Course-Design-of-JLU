@@ -4,10 +4,12 @@
 using namespace std;
 
 // 构造：群主自动成为第一个群成员
-Group_Hejr::Group_Hejr(string gid, string gname, string owner,
+Group_Hejr::Group_Hejr(string service, string gid, string gname, string owner,
                    GroupStrategy_Hejr* strat)
 {
+    serviceType = service;
     groupId   = gid;
+    legacyGroupId = "";
     groupName = gname;
     ownerId   = owner;
     strategy  = strat;
@@ -75,20 +77,46 @@ bool Group_Hejr::inviteJoin(string userId, string inviterId)
     return true;
 }
 
+// ---------- 转让群主：保留原有加入顺序 ----------
+bool Group_Hejr::transferOwnership(string operatorId, string targetId)
+{
+    if (operatorId != ownerId)
+    {
+        cout << "[群" << groupId << "] 只有群主可以转让群主。" << endl;
+        return false;
+    }
+    if (targetId == ownerId || !isMember(targetId))
+    {
+        cout << "[群" << groupId << "] 请指定本群内的其他成员。" << endl;
+        return false;
+    }
+    ownerId = targetId;
+    admins.erase(remove(admins.begin(), admins.end(), targetId), admins.end());
+    cout << "[群" << groupId << "] 群主已转让给 " << targetId
+         << "，原群主成为普通成员。" << endl;
+    return true;
+}
+
 // ---------- 主动退群 ----------
 bool Group_Hejr::quitGroup(string userId)
 {
-    if (userId == ownerId)
-    {
-        cout << "[群" << groupId << "] 群主不能退群（可解散群）。" << endl;
-        return false;
-    }
     vector<string>::iterator it =
         find(members.begin(), members.end(), userId);
     if (it == members.end())
     {
         cout << "[群" << groupId << "] 用户 " << userId << " 不在群内。" << endl;
         return false;
+    }
+
+    if (strategy->shouldDissolveOnExit(userId == ownerId, members.size()))
+    {
+        members.clear();
+        admins.clear();
+        subGroups.clear();
+        ownerId.clear();
+        cout << "[群" << groupId << "] 用户 " << userId
+             << " 退群，按" << strategy->getStrategyName() << "规则解散群聊。" << endl;
+        return true;
     }
 
     members.erase(it);
@@ -100,6 +128,14 @@ bool Group_Hejr::quitGroup(string userId)
             remove(subGroups[i].members.begin(),
                    subGroups[i].members.end(), userId),
             subGroups[i].members.end());
+    }
+
+    if (userId == ownerId)
+    {
+        ownerId = members.front();
+        admins.erase(remove(admins.begin(), admins.end(), ownerId), admins.end());
+        cout << "[群" << groupId << "] 群主自动转让给最早加入的成员 "
+             << ownerId << "。" << endl;
     }
 
     cout << "[群" << groupId << "] 用户 " << userId << " 已退群。" << endl;
@@ -179,6 +215,11 @@ bool Group_Hejr::addAdmin(string operatorId, string userId)
         cout << "[群" << groupId << "] 用户 " << userId << " 不在群内。" << endl;
         return false;
     }
+    if (userId == ownerId)
+    {
+        cout << "[群" << groupId << "] 群主无需再设为管理员。" << endl;
+        return false;
+    }
     if (isAdmin(userId))
     {
         cout << "[群" << groupId << "] 用户 " << userId << " 已是管理员。" << endl;
@@ -193,6 +234,11 @@ bool Group_Hejr::addAdmin(string operatorId, string userId)
 // ---------- 移除管理员 ----------
 bool Group_Hejr::removeAdmin(string operatorId, string userId)
 {
+    if (!strategy->hasAdminSystem())
+    {
+        cout << "[群" << groupId << "] 当前模式没有管理员制度。" << endl;
+        return false;
+    }
     if (operatorId != ownerId)
     {
         cout << "[群" << groupId << "] 只有群主可以移除管理员。" << endl;
@@ -245,9 +291,80 @@ bool Group_Hejr::createSubgroup(string name, string creatorId)
     return true;
 }
 
+bool Group_Hejr::addSubgroupMember(string name, string operatorId, string userId)
+{
+    if (!strategy->canCreateSubgroup())
+    {
+        cout << "[群" << groupId << "] 当前模式不支持临时讨论组。" << endl;
+        return false;
+    }
+    if (!isMember(operatorId) || (operatorId != ownerId && !isAdmin(operatorId)))
+    {
+        cout << "[群" << groupId << "] 只有群主或管理员可以管理讨论组成员。" << endl;
+        return false;
+    }
+    if (!isMember(userId))
+    {
+        cout << "[群" << groupId << "] 目标用户须先加入本群。" << endl;
+        return false;
+    }
+    for (size_t i = 0; i < subGroups.size(); ++i)
+    {
+        if (subGroups[i].name != name) continue;
+        vector<string>& members = subGroups[i].members;
+        if (find(members.begin(), members.end(), userId) != members.end())
+        {
+            cout << "[群" << groupId << "] 用户已在该讨论组。" << endl;
+            return false;
+        }
+        members.push_back(userId);
+        cout << "[群" << groupId << "] 已将 " << userId << " 加入讨论组「"
+             << name << "」。" << endl;
+        return true;
+    }
+    cout << "[群" << groupId << "] 讨论组不存在。" << endl;
+    return false;
+}
+
+bool Group_Hejr::removeSubgroupMember(string name, string operatorId, string userId)
+{
+    if (!strategy->canCreateSubgroup())
+    {
+        cout << "[群" << groupId << "] 当前模式不支持临时讨论组。" << endl;
+        return false;
+    }
+    if (!isMember(operatorId) || (operatorId != ownerId && !isAdmin(operatorId)))
+    {
+        cout << "[群" << groupId << "] 只有群主或管理员可以管理讨论组成员。" << endl;
+        return false;
+    }
+    for (size_t i = 0; i < subGroups.size(); ++i)
+    {
+        if (subGroups[i].name != name) continue;
+        vector<string>& members = subGroups[i].members;
+        vector<string>::iterator found = find(members.begin(), members.end(), userId);
+        if (found == members.end())
+        {
+            cout << "[群" << groupId << "] 目标用户不在该讨论组。" << endl;
+            return false;
+        }
+        members.erase(found);
+        cout << "[群" << groupId << "] 已将 " << userId << " 移出讨论组「"
+             << name << "」。" << endl;
+        return true;
+    }
+    cout << "[群" << groupId << "] 讨论组不存在。" << endl;
+    return false;
+}
+
 // ---------- 列出所有子群 ----------
 void Group_Hejr::listSubgroups() const
 {
+    if (!strategy->canCreateSubgroup())
+    {
+        cout << "[群" << groupId << "] 当前模式不支持临时讨论组。" << endl;
+        return;
+    }
     cout << "[群" << groupId << "] 临时讨论组列表（共 "
          << subGroups.size() << " 个）：" << endl;
     for (size_t i = 0; i < subGroups.size(); i++)
@@ -310,6 +427,10 @@ void Group_Hejr::setStrategy(GroupStrategy_Hejr* strat)
 
 // ---------- getter ----------
 string Group_Hejr::getGroupId() const       { return groupId; }
+string Group_Hejr::getServiceType() const   { return serviceType; }
+string Group_Hejr::getStorageId() const     { return serviceType + ":" + groupId; }
+string Group_Hejr::getLegacyGroupId() const { return legacyGroupId; }
+void Group_Hejr::setLegacyGroupId(string id) { legacyGroupId = id; }
 string Group_Hejr::getGroupName() const     { return groupName; }
 string Group_Hejr::getOwnerId() const       { return ownerId; }
 void Group_Hejr::setOwnerId(string userId)
@@ -334,10 +455,19 @@ void Group_Hejr::loadMember(string userId)
         members.push_back(userId);
 }
 
+void Group_Hejr::loadMembers(const vector<string>& userIds)
+{
+    members.clear();
+    for (size_t i = 0; i < userIds.size(); ++i)
+        if (!userIds[i].empty() && userIds[i] != "system") loadMember(userIds[i]);
+    // 兼容旧数据缺失群主的情况；已保存的成员顺序不会改变。
+    loadMember(ownerId);
+}
+
 // 直接添加管理员（不经过群主校验，用于从文件恢复数据）
 void Group_Hejr::loadAdmin(string userId)
 {
-    if (!isAdmin(userId))
+    if (isMember(userId) && userId != ownerId && !isAdmin(userId))
         admins.push_back(userId);
 }
 

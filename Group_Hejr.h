@@ -28,10 +28,12 @@ struct SubGroup_Hejr
 class Group_Hejr
 {
 private:
+    string serviceType;        // 所属服务：QQ 或 WeChat，切换管理策略时保持不变
     string groupId;            // 群号（如 1001~1006）
+    string legacyGroupId;      // 迁移前的纯数字群号，用于读取原有群聊记录
     string groupName;          // 群名称
     string ownerId;            // 群主ID
-    vector<string> members;    // 群成员ID列表（含群主）
+    vector<string> members;    // 按加入先后保存成员；转让群主不改变顺序
     vector<string> admins;     // 管理员ID列表（仅QQ群模式有效）
     vector<SubGroup_Hejr> subGroups; // 临时讨论组（子群）
     GroupStrategy_Hejr* strategy;    // 当前群管理策略（组合）
@@ -41,7 +43,7 @@ private:
 
 public:
     // 构造：建群时指定群号、群名、群主、初始策略，群主自动入群
-    Group_Hejr(string gid, string gname, string owner,
+    Group_Hejr(string service, string gid, string gname, string owner,
              GroupStrategy_Hejr* strat);
 
     // ---------- 入群 / 退群 / 踢人 ----------
@@ -51,8 +53,9 @@ public:
     // 推荐/邀请加入：inviterId 必须是本群成员（两种模式均支持）
     bool inviteJoin(string userId, string inviterId);
 
-    // 主动退群（群主不能退群）
+    // 主动退群；返回成功后，空成员表表示需要由群容器删除该群
     bool quitGroup(string userId);
+    bool transferOwnership(string operatorId, string targetId);
 
     // 挨T：操作者须为群主；QQ群模式下管理员也可踢普通成员
     bool kickMember(string operatorId, string targetId);
@@ -63,6 +66,8 @@ public:
 
     // ---------- 临时讨论组（子群） ----------
     bool createSubgroup(string name, string creatorId);
+    bool addSubgroupMember(string name, string operatorId, string userId);
+    bool removeSubgroupMember(string name, string operatorId, string userId);
     void listSubgroups() const;
 
     // ---------- 查询 / 展示 ----------
@@ -75,12 +80,17 @@ public:
 
     // ---------- 文件I/O辅助：直接加载成员/管理员（绕过策略校验，仅用于反序列化） ----------
     void loadMember(string userId);     // 直接添加成员（不经过申请/邀请流程）
+    void loadMembers(const vector<string>& userIds); // 恢复完整加入顺序
     void loadAdmin(string userId);      // 直接添加管理员
     vector<SubGroup_Hejr> getSubGroups() const;  // 获取子群列表
     void loadSubGroup(string name, vector<string> mems);  // 直接加载子群
 
     // ---------- getter ----------
     string getGroupId() const;
+    string getServiceType() const;
+    string getStorageId() const; // 服务:群号，用于持久化和唯一定位
+    string getLegacyGroupId() const;
+    void setLegacyGroupId(string id);
     string getGroupName() const;
     string getOwnerId() const;
     void setOwnerId(string userId);

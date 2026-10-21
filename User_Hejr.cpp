@@ -92,6 +92,14 @@ int User_Hejr::getTAge() const
     }
 
     int age = curYear - regYear;
+    if (registerTime.size() >= 10)
+    {
+        int regMonth = atoi(registerTime.substr(5, 2).c_str());
+        int regDay = atoi(registerTime.substr(8, 2).c_str());
+        if (ltm->tm_mon + 1 < regMonth ||
+            (ltm->tm_mon + 1 == regMonth && ltm->tm_mday < regDay))
+            --age;
+    }
     return age < 0 ? 0 : age;
 }
 
@@ -174,9 +182,9 @@ void User_Hejr::printInfo() const
         cout << "微信账号号:" << wechatId << endl;
         cout << "绑定QQ:    " << (wechatBoundQQ.empty() ? "未绑定" : wechatBoundQQ) << endl;
     }
-    cout << "出生时间:  " << birthday << endl;
+    cout << "出生时间:  " << (birthday.empty() ? "未填写" : birthday) << endl;
     cout << "注册时间:  " << registerTime << "  (T龄: " << getTAge() << " 年)" << endl;
-    cout << "所在地:    " << location << endl;
+    cout << "所在地:    " << (location.empty() ? "未填写" : location) << endl;
 
     cout << "已开通服务: ";
     for (size_t i = 0; i < openedServices.size(); i++)

@@ -27,7 +27,8 @@ public:
     static std::vector<MessageRecord_Hejr> readAll();
     static std::vector<MessageRecord_Hejr> conversation(const std::string& account,
                                                          const std::string& kind,
-                                                         const std::string& target);
+                                                         const std::string& target,
+                                                         const std::string& legacyGroupId = "");
     static std::string encodeHex(const std::string& value);
     static std::string decodeHex(const std::string& value);
     static std::string formatTime(long long milliseconds);

@@ -19,6 +19,7 @@ public:
     virtual bool   canInviteJoin();
     virtual bool   canCreateSubgroup();
     virtual bool   hasAdminSystem();
+    virtual bool   shouldDissolveOnExit(bool isOwner, size_t memberCount);
     virtual string getStrategyName();
 };
 
