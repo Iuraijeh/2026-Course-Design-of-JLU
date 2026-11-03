@@ -75,6 +75,7 @@ bool Friend_Hejr::hasServiceType(string svc) const
     return find(serviceTypes.begin(), serviceTypes.end(), svc) != serviceTypes.end();
 }
 
+// 好友服务关系：同一好友可属于多个服务；重复服务不会再次加入。
 bool Friend_Hejr::addServiceType(string svc)
 {
     if (svc.empty() || hasServiceType(svc)) return false;
@@ -82,6 +83,7 @@ bool Friend_Hejr::addServiceType(string svc)
     return true;
 }
 
+// 好友服务关系：只移除指定服务，其余服务仍保留。
 bool Friend_Hejr::removeServiceType(string svc)
 {
     vector<string>::iterator it = find(serviceTypes.begin(), serviceTypes.end(), svc);

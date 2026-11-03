@@ -19,6 +19,7 @@ ServiceBase_Hejr::~ServiceBase_Hejr()
 // ---------- 通用接口 ----------
 
 // 平台已登录时，其它已开通服务免密自动登录
+// 答辩定位：联动登录：平台验证并确认后，设置其他已开通服务的登录状态。
 void ServiceBase_Hejr::autoLogin()
 {
     loggedIn = true;
@@ -69,6 +70,7 @@ void ServiceBase_Hejr::loadFriend(string friendId)
 }
 
 // 查询与另一服务的共同好友（默认实现：对好友ID列表求交集）
+// 答辩定位：共同好友：分别排序两个服务的好友账号，再通过集合交集求共同好友。
 vector<string> ServiceBase_Hejr::queryCommonFriends(ServiceBase_Hejr* other)
 {
     vector<string> a = friendIds;

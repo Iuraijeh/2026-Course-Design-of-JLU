@@ -11,7 +11,6 @@
 #include "TcpChat_Hejr.h"
 using namespace std;
 
-// ============================================================
 // 平台总控类 Platform_Hejr
 // 职责：
 //   1. 持有用户容器、群容器，管理当前登录用户的服务/好友容器
@@ -20,8 +19,6 @@ using namespace std;
 //   4. 群特色展示与动态切换管理策略
 //   5. 菜单驱动（数字选择，支持返回上级）
 //   6. 首次运行初始化测试数据
-// 类名后缀 _Hejr 为姓名缩写占位符，请替换。
-// ============================================================
 class Platform_Hejr
 {
 private:
@@ -48,6 +45,8 @@ private:
 
     // ---------- 子菜单 ----------
     void friendMenu();         // 好友管理
+    void editFriend();         // 分别修改备注或单个服务关系
+    bool changeFriendService(string friendId, string serviceType, bool adding);
     void groupMenu();          // 群管理
     void createGroupFromFriends(); // 从对应服务好友中选择初始成员
     void serviceMenu();        // 开通管理
@@ -61,6 +60,7 @@ private:
     void startMessageWatcher();
     void stopMessageWatcher();
     string resolveFriendAccount(const string& input, const string& serviceType) const;
+    bool prepareServiceAccount(User_Hejr& user, const string& serviceType);
 
 public:
     // 构造：加载数据，首次运行时初始化
@@ -71,7 +71,8 @@ public:
 
     // ---------- 登录 / 登出 ----------
     // 从指定已开通服务登录；确认一次后，其他已开通服务自动登录。
-    bool login(string userId, string password, string entryService);
+    // reopen 为 true 时，认证后为未开通任何服务的账号重新开通一个服务。
+    bool login(string userId, string password, string entryService, bool reopen = false);
 
     // 注册：平台账号号唯一且不可修改，第二列为昵称。
     bool registerUser(string accountNumber, string password,

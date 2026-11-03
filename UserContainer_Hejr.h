@@ -5,15 +5,14 @@
 #include "User_Hejr.h"
 using namespace std;
 
-// ============================================================
 // 用户容器类 UserContainer_Hejr
 // 职责：管理所有 User_Hejr 对象
 // 持久化：构造时从 users.txt 加载，析构时写回 users.txt（断电保存）
 // 文件格式：每行一条记录，字段以 | 分隔
 //   accountNumber|nickname|birthday|registerTime|location|
 //   openedServices|friendIds|groupIds|password|wechatId|wechatIdChangedMonth|wechatBoundQQ
-// 类名后缀 _Hejr 为姓名缩写占位符，请替换。
-// ============================================================
+//   可选第13列：服务标识:账号;服务标识:账号（保留关闭服务的账号）。
+
 class UserContainer_Hejr
 {
 private:
@@ -32,6 +31,8 @@ public:
     void removeUser(string userId);
     User_Hejr* findUserById(string accountNumber);   // 按不可变帐号号查找
     User_Hejr* findUserByWeChatId(string wechatId);
+    User_Hejr* findUserByServiceId(string serviceType, string account);
+    User_Hejr* findUserByAnyServiceId(string account);
     bool isAccountNumberUsed(string accountNumber) const;
     bool isWeChatIdUsed(string wechatId, string exceptAccount = "") const;
     bool ensureWeChatId(User_Hejr& user);

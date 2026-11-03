@@ -14,11 +14,15 @@
 #include "ConsoleUtil.h"
 #endif
 #include "Platform_Hejr.h"
+#include "ServiceRegistry_Hejr.h"
 #include <filesystem>
+#include <iostream>
+#include <exception>
 #ifdef _WIN32
 #include <windows.h>
 #endif
 
+// 答辩定位：程序入口：切换数据目录、初始化控制台和服务配置，然后创建平台并运行菜单。
 int main()
 {
     // 桌面上的 design-N.exe 仍使用 Design 目录中的课程数据。
@@ -31,8 +35,9 @@ int main()
         {
             std::filesystem::path dataDir =
                 std::filesystem::path(executablePath).parent_path() / "Design";
-            if (std::filesystem::exists(dataDir / "users.txt") &&
-                std::filesystem::exists(dataDir / "groups.txt"))
+            if (std::filesystem::exists(dataDir / "services.cfg") ||
+                (std::filesystem::exists(dataDir / "users.txt") &&
+                 std::filesystem::exists(dataDir / "groups.txt")))
                 std::filesystem::current_path(dataDir);
         }
     }
@@ -40,8 +45,17 @@ int main()
     // 在所有输出之前，先将控制台切换为 UTF-8 编码
     ConsoleUtil_Hejr::initConsole();
 
-    Platform_Hejr platform;
-    platform.run();
+    try
+    {
+        ServiceRegistry_Hejr::instance(); // 配置错误时，在读取、修改业务数据之前停止。
+        Platform_Hejr platform;
+        platform.run();
+    }
+    catch (const std::exception& error)
+    {
+        std::cerr << "[启动/数据错误] " << error.what() << std::endl;
+        return 1;
+    }
     return 0;
 }
 

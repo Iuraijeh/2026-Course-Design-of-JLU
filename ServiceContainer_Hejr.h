@@ -6,7 +6,6 @@
 #include "ServiceBase_Hejr.h"
 using namespace std;
 
-// ============================================================
 // 已开通服务容器类 ServiceContainer_Hejr
 // 职责：管理某用户已开通的微X服务（ServiceBase_Hejr* 指针）
 // 说明：
@@ -14,8 +13,6 @@ using namespace std;
 //   - 容器析构时释放所有服务对象内存；
 //   - 题目要求"开通管理"：用户选择开通 N 个微X服务，
 //     openService() 负责实例化对应服务并加入容器。
-// 类名后缀 _Hejr 为姓名缩写占位符，请替换。
-// ============================================================
 class ServiceContainer_Hejr
 {
 private:
@@ -30,7 +27,7 @@ public:
     ~ServiceContainer_Hejr();
 
     // ---------- 开通 / 关闭服务 ----------
-    // 开通服务：以统一服务实现创建 QQ / WeChat / Weibo 入口
+    // 开通服务：通过服务注册表校验，用统一服务类实例化。
     bool openService(string serviceType);
 
     // 关闭服务

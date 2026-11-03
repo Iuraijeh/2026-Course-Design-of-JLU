@@ -6,15 +6,12 @@
 #include "User_Hejr.h"
 using namespace std;
 
-// ============================================================
 // 微X服务抽象基类 ServiceBase_Hejr
 // 说明：
 //   - 所有微X服务（QQ / 微信 / 微博 / ...）的统一接口
 //   - 定义纯虚函数 login / addFriend / removeFriend /
 //     queryCommonFriends / getServiceType，由派生类实现
 //   - 提供通用能力：autoLogin（平台联动免密登录）、好友列表维护等
-//   - 类名后缀 _Hejr 为姓名缩写占位符，请替换
-// ============================================================
 class ServiceBase_Hejr
 {
 protected:

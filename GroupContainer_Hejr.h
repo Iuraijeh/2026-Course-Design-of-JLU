@@ -8,7 +8,6 @@
 #include "WeChatGroupStrategy_Hejr.h"
 using namespace std;
 
-// ============================================================
 // 群容器类 GroupContainer_Hejr
 // 职责：管理所有群（Group_Hejr* 指针）
 // 持久化：构造时加载，修改成功后由平台立即保存。
@@ -19,8 +18,7 @@ using namespace std;
 //   members(逗号分隔)|admins(逗号分隔)|
 //   subgroups(分号分隔,每个: name:成员逗号)
 // 策略对象由容器统一创建、管理、释放。
-// 类名后缀 _Hejr 为姓名缩写占位符，请替换。
-// ============================================================
+
 class GroupContainer_Hejr
 {
 private:

@@ -1,6 +1,7 @@
 #include "WeChatGroupStrategy_Hejr.h"
 
 // 微信群：不允许申请加入
+// 答辩定位：微信群策略：不允许申请加入，通过群成员邀请加入。
 bool WeChatGroupStrategy_Hejr::canApplyJoin()
 {
     return false;
@@ -25,6 +26,7 @@ bool WeChatGroupStrategy_Hejr::hasAdminSystem()
 }
 
 // 策略名称
+// 答辩定位：微信群退群：剩两人时任一人退群解散；兼容旧数据的单人群退群。
 bool WeChatGroupStrategy_Hejr::shouldDissolveOnExit(bool, size_t memberCount)
 {
     // <= 同时兼容旧版预设群、踢人后仅剩群主的情况。

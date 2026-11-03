@@ -14,6 +14,7 @@ using namespace std;
 static const char* MESSAGE_FILE = "messages.txt";
 static atomic<unsigned long> messageCounter(0);
 
+// 答辩定位：消息编码：文本转十六进制，避免内容中的分隔符破坏记录格式。
 string MessageStore_Hejr::encodeHex(const string& value)
 {
     static const char* digits = "0123456789abcdef";
@@ -90,6 +91,7 @@ vector<MessageRecord_Hejr> MessageStore_Hejr::readAll()
     return messages;
 }
 
+// 答辩定位：消息保存：按记录 ID 去重后追加到 messages.txt。
 bool MessageStore_Hejr::append(const MessageRecord_Hejr& message)
 {
     vector<MessageRecord_Hejr> existing = readAll();
@@ -104,6 +106,7 @@ bool MessageStore_Hejr::append(const MessageRecord_Hejr& message)
     return file.good();
 }
 
+// 答辩定位：消息查询：按双方账号或群号筛选对应的历史记录。
 vector<MessageRecord_Hejr> MessageStore_Hejr::conversation(const string& account,
                                                               const string& kind,
                                                               const string& target,

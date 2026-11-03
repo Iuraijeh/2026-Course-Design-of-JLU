@@ -1,4 +1,5 @@
 #include "User_Hejr.h"
+#include "ServiceRegistry_Hejr.h"
 #include <iostream>
 #include <ctime>
 #include <algorithm>
@@ -52,6 +53,23 @@ void   User_Hejr::setWeChatIdChangedMonth(string month) { wechatIdChangedMonth =
 string User_Hejr::getWeChatBoundQQ() const { return wechatBoundQQ; }
 void   User_Hejr::setWeChatBoundQQ(string account) { wechatBoundQQ = account; }
 
+// 答辩定位：账号映射：微信返回独立 ID；新服务返回保存的 ID，共享服务使用平台号。
+string User_Hejr::getServiceAccount(string serviceType) const
+{
+    if (serviceType == "WeChat") return wechatId;
+    map<string, string>::const_iterator found = serviceAccounts.find(serviceType);
+    if (found != serviceAccounts.end()) return found->second;
+    if (ServiceRegistry_Hejr::instance().isIndependent(serviceType)) return "";
+    return accountNumber;
+}
+
+void User_Hejr::setServiceAccount(string serviceType, string account)
+{
+    serviceAccounts[serviceType] = account;
+}
+
+const map<string, string>& User_Hejr::getServiceAccounts() const { return serviceAccounts; }
+
 string User_Hejr::getBirthday() const    { return birthday; }
 void   User_Hejr::setBirthday(string b)  { birthday = b; }
 
@@ -77,6 +95,7 @@ string User_Hejr::getPassword() const
 }
 
 // 计算 T龄：当前年份 - 注册年份
+// 答辩定位：T龄：用当前日期和申请日期计算满周年数，结果不小于零。
 int User_Hejr::getTAge() const
 {
     // 取当前年份
@@ -170,6 +189,7 @@ vector<string> User_Hejr::getGroupIds() const
 }
 
 // 打印用户全部信息
+// 答辩定位：用户信息展示：输出账号、微信绑定、出生日期、所在地、服务、好友和群列表。
 void User_Hejr::printInfo() const
 {
     cout << "========== 用户信息 ==========" << endl;
@@ -182,6 +202,9 @@ void User_Hejr::printInfo() const
         cout << "微信账号号:" << wechatId << endl;
         cout << "绑定QQ:    " << (wechatBoundQQ.empty() ? "未绑定" : wechatBoundQQ) << endl;
     }
+    for (const string& service : openedServices)
+        if (service != "QQ" && service != "WeChat" && service != "Weibo")
+            cout << service << "账号号: " << getServiceAccount(service) << endl;
     cout << "出生时间:  " << (birthday.empty() ? "未填写" : birthday) << endl;
     cout << "注册时间:  " << registerTime << "  (T龄: " << getTAge() << " 年)" << endl;
     cout << "所在地:    " << (location.empty() ? "未填写" : location) << endl;

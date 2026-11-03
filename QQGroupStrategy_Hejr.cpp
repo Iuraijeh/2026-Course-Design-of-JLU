@@ -1,6 +1,7 @@
 #include "QQGroupStrategy_Hejr.h"
 
 // QQ群：允许申请加入
+// 答辩定位：QQ群策略：可以申请加入，并支持临时讨论组和管理员。
 bool QQGroupStrategy_Hejr::canApplyJoin()
 {
     return true;
@@ -25,6 +26,7 @@ bool QQGroupStrategy_Hejr::hasAdminSystem()
 }
 
 // 策略名称
+// 答辩定位：QQ群退群：群主退群时解散；普通成员退群不因其退群而解散。
 bool QQGroupStrategy_Hejr::shouldDissolveOnExit(bool isOwner, size_t)
 {
     return isOwner;

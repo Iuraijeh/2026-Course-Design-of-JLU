@@ -1,5 +1,6 @@
 #include "ServiceContainer_Hejr.h"
 #include "MicroXService_Hejr.h"
+#include "ServiceRegistry_Hejr.h"
 #include <iostream>
 #include <algorithm>
 using namespace std;
@@ -19,6 +20,7 @@ ServiceContainer_Hejr::~ServiceContainer_Hejr()
 }
 
 // ---------- 开通服务 ----------
+// 答辩定位：服务容器：校验注册表中的服务类型，创建统一服务对象并纳入容器。
 bool ServiceContainer_Hejr::openService(string serviceType)
 {
     // 检查是否已开通
@@ -30,7 +32,7 @@ bool ServiceContainer_Hejr::openService(string serviceType)
 
     ServiceBase_Hejr* svc = NULL;
 
-    if (serviceType != "QQ" && serviceType != "WeChat" && serviceType != "Weibo")
+    if (ServiceRegistry_Hejr::instance().find(serviceType) == NULL)
     {
         cout << "[服务容器] 未知服务类型: " << serviceType << endl;
         return false;
@@ -45,6 +47,7 @@ bool ServiceContainer_Hejr::openService(string serviceType)
 }
 
 // ---------- 关闭服务 ----------
+// 答辩定位：服务容器：查找并释放指定服务对象，其他服务对象不受影响。
 bool ServiceContainer_Hejr::closeService(string serviceType)
 {
     for (size_t i = 0; i < services.size(); i++)

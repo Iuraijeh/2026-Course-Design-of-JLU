@@ -1,4 +1,5 @@
 #include "UserContainer_Hejr.h"
+#include "ServiceRegistry_Hejr.h"
 #include <iostream>
 #include <fstream>
 #include <sstream>
@@ -6,6 +7,7 @@
 #include <cctype>
 #include <cstdint>
 #include <iomanip>
+#include <stdexcept>
 using namespace std;
 
 static string normalizeStoredAccount(const string& account)
@@ -124,6 +126,34 @@ User_Hejr* UserContainer_Hejr::findUserByWeChatId(string wechatId)
     return NULL;
 }
 
+// 服务账号查找：按指定已开通服务的账号定位所属平台用户。
+User_Hejr* UserContainer_Hejr::findUserByServiceId(string serviceType, string account)
+{
+    if (ServiceRegistry_Hejr::instance().find(serviceType) == NULL) return NULL;
+    string key = normalizeStoredAccount(account);
+    if (key.empty()) return NULL;
+    for (User_Hejr& user : users)
+        if (user.isServiceOpened(serviceType) &&
+            normalizeStoredAccount(user.getServiceAccount(serviceType)) == key) return &user;
+    return NULL;
+}
+
+User_Hejr* UserContainer_Hejr::findUserByAnyServiceId(string account)
+{
+    string key = normalizeStoredAccount(account);
+    if (key.empty()) return NULL;
+    User_Hejr* user = findUserById(account);
+    if (user != NULL) return user;
+    for (User_Hejr& candidate : users)
+    {
+        if (normalizeStoredAccount(candidate.getWeChatId()) == key) return &candidate;
+        for (const auto& item : candidate.getServiceAccounts())
+            if (normalizeStoredAccount(item.second) == key) return &candidate;
+    }
+    return NULL;
+}
+
+// 账号唯一性：检查平台号、微信号以及已保存的新服务账号。
 bool UserContainer_Hejr::isWeChatIdUsed(string wechatId, string exceptAccount) const
 {
     string key = normalizeStoredAccount(wechatId);
@@ -137,10 +167,14 @@ bool UserContainer_Hejr::isWeChatIdUsed(string wechatId, string exceptAccount) c
             !user.getWeChatId().empty() &&
             normalizeStoredAccount(user.getWeChatId()) == key)
             return true;
+        // 新服务账号也保留名称占用，防止关闭后被另一个账号抢用。
+        for (const auto& item : user.getServiceAccounts())
+            if (normalizeStoredAccount(item.second) == key) return true;
     }
     return false;
 }
 
+// 微信默认账号：首次需要时生成独立 ID 并检查与现有账号的冲突。
 bool UserContainer_Hejr::ensureWeChatId(User_Hejr& user)
 {
     if (!user.isServiceOpened("WeChat") || !user.getWeChatId().empty()) return false;
@@ -184,6 +218,7 @@ void UserContainer_Hejr::listAll() const
 }
 
 // ---------- 从文件加载 ----------
+// 用户数据读取：解析 users.txt 的基本信息、开通服务和可选扩展账号列。
 void UserContainer_Hejr::load(string fname)
 {
     ifstream fin(fname.c_str());
@@ -247,6 +282,30 @@ void UserContainer_Hejr::load(string fname)
         if (fields.size() > 9) u.setWeChatId(fields[9]);
         if (fields.size() > 10) u.setWeChatIdChangedMonth(fields[10]);
         if (fields.size() > 11) u.setWeChatBoundQQ(fields[11]);
+        if (fields.size() > 12)
+        {
+            istringstream accounts(fields[12]);
+            string item;
+            while (getline(accounts, item, ';'))
+            {
+                size_t colon = item.find(':');
+                if (colon == string::npos || colon == 0 || colon + 1 == item.size())
+                    throw runtime_error("users.txt 的扩展服务账号格式错误，请检查数据。");
+                string service = item.substr(0, colon), account = item.substr(colon + 1);
+                u.setServiceAccount(service, account);
+                const ServiceDefinition_Hejr* definition = ServiceRegistry_Hejr::instance().find(service);
+                if (definition != NULL && definition->independentId == (account == u.getAccountNumber()))
+                    throw runtime_error("服务 " + service + " 的账号规则与已保存账号冲突，请恢复原配置。");
+            }
+        }
+        for (const string& service : u.getOpenedServices())
+        {
+            if (ServiceRegistry_Hejr::instance().find(service) == NULL)
+                throw runtime_error("已开通服务 " + service + " 未在 services.cfg 中定义，请恢复配置。");
+            if (service != "WeChat" && ServiceRegistry_Hejr::instance().isIndependent(service) &&
+                u.getServiceAccount(service).empty())
+                throw runtime_error("已开通的独立服务 " + service + " 缺少账号，请检查数据和配置。");
+        }
 
         users.push_back(u);
     }
@@ -260,6 +319,7 @@ void UserContainer_Hejr::load(string fname)
 }
 
 // ---------- 保存到文件 ----------
+// 用户数据保存：按分隔字段写入用户信息；有新服务账号时追加扩展字段。
 void UserContainer_Hejr::save(string fname) const
 {
     ofstream fout(fname.c_str());
@@ -283,7 +343,19 @@ void UserContainer_Hejr::save(string fname) const
              << u.getPassword()                  << "|"
              << u.getWeChatId()                  << "|"
              << u.getWeChatIdChangedMonth()      << "|"
-             << u.getWeChatBoundQQ()             << endl;
+             << u.getWeChatBoundQQ();
+        if (!u.getServiceAccounts().empty())
+        {
+            fout << "|";
+            bool first = true;
+            for (const auto& item : u.getServiceAccounts())
+            {
+                if (!first) fout << ";";
+                fout << item.first << ":" << item.second;
+                first = false;
+            }
+        }
+        fout << endl;
     }
     fout.close();
 

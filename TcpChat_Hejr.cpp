@@ -33,7 +33,6 @@ TcpChat_Hejr::TcpChat_Hejr()
     wsaStarted    = false;
     serverPort    = 0;
     listening     = false;
-    listenThread  = NULL;
 }
 
 // ============================================================
@@ -94,6 +93,16 @@ void TcpChat_Hejr::cleanupWinsock()
 // ============================================================
 
 // 监听线程函数（线程入口，friend 可访问私有成员）
+static int waitForReadable(SOCKET socketHandle)
+{
+    fd_set readers;
+    FD_ZERO(&readers);
+    FD_SET(socketHandle, &readers);
+    timeval timeout = {0, 200000};
+    return select(0, &readers, NULL, NULL, &timeout);
+}
+
+// 答辩定位：TCP 接收：后台监听连接，接收数据并解析消息记录。
 void serverListenThread(TcpChat_Hejr* self, int port)
 {
     // 创建 TCP 套接字（SOCK_STREAM）
@@ -141,7 +150,11 @@ void serverListenThread(TcpChat_Hejr* self, int port)
     // 接受连接并循环接收消息
     while (self->isListening())
     {
-        // accept：阻塞等待客户端连接
+        // 定期检查停止标记，退出时不依赖额外的自身连接唤醒。
+        int ready = waitForReadable(listenSock);
+        if (ready == SOCKET_ERROR) break;
+        if (ready == 0) continue;
+        if (!self->isListening()) break;
         sockaddr_in clientAddr;
         int clientLen = sizeof(clientAddr);
         SOCKET clientSock = accept(listenSock, (sockaddr*)&clientAddr, &clientLen);
@@ -160,10 +173,20 @@ void serverListenThread(TcpChat_Hejr* self, int port)
         char buf[1024];
         int recvLen;
         string payload;
-        while ((recvLen = recv(clientSock, buf, sizeof(buf), 0)) > 0)
+        while (self->isListening())
         {
+            int readable = waitForReadable(clientSock);
+            if (readable == SOCKET_ERROR) break;
+            if (readable == 0) continue;
+            recvLen = recv(clientSock, buf, sizeof(buf), 0);
+            if (recvLen <= 0) break;
             payload.append(buf, recvLen);
             if (payload.size() > 20000) break;
+        }
+        if (!self->isListening())
+        {
+            closesocket(clientSock);
+            break;
         }
         if (payload.compare(0, 4, "MX1|") == 0)
         {
@@ -202,9 +225,11 @@ void serverListenThread(TcpChat_Hejr* self, int port)
     }
 
     closesocket(listenSock);
+    self->listening = false;
     cout << "[TCP] 服务端已停止监听。" << endl;
 }
 
+// 答辩定位：TCP 启动：初始化 Winsock，创建后台接收线程。
 bool TcpChat_Hejr::startServer(int port)
 {
     // 确保 Winsock 已初始化
@@ -218,11 +243,11 @@ bool TcpChat_Hejr::startServer(int port)
     }
 
     serverPort = port;
+    if (listenThread.joinable()) listenThread.join();
     listening  = true;
 
     // 在独立线程中运行监听循环，避免阻塞主线程
-    thread t(serverListenThread, this, port);
-    t.detach();   // 分离线程，后台运行
+    listenThread = thread(serverListenThread, this, port);
 
     return true;
 }
@@ -230,30 +255,15 @@ bool TcpChat_Hejr::startServer(int port)
 // ============================================================
 // 停止监听
 // ============================================================
+// 答辩定位：TCP 退出：设置停止标记并等待线程结束，再由析构函数清理 Winsock。
 void TcpChat_Hejr::stopServer()
 {
-    if (!listening) return;
-
     listening = false;
-
-    // 向本机发送一个连接请求，让 accept() 返回以退出循环
-    // （简单做法：连接自身端口使 accept 返回并立即关闭）
-    if (serverPort > 0)
+    if (listenThread.joinable())
     {
-        SOCKET s = socket(AF_INET, SOCK_STREAM, IPPROTO_TCP);
-        if (s != INVALID_SOCKET)
-        {
-            sockaddr_in addr;
-            memset(&addr, 0, sizeof(addr));
-            addr.sin_family      = AF_INET;
-            addr.sin_addr.s_addr = inet_addr("127.0.0.1");
-            addr.sin_port        = htons(serverPort);
-            connect(s, (sockaddr*)&addr, sizeof(addr));
-            closesocket(s);
-        }
+        cout << "[TCP] 正在停止监听..." << endl;
+        listenThread.join();
     }
-
-    cout << "[TCP] 正在停止监听..." << endl;
 }
 
 bool TcpChat_Hejr::isListening() const
@@ -265,6 +275,7 @@ bool TcpChat_Hejr::isListening() const
 // 客户端：向指定 IP:Port 发送消息
 // 流程：socket → connect → send
 // ============================================================
+// 答辩定位：TCP 发送：连接目标 IP 和端口，将消息协议数据发送给对端。
 bool TcpChat_Hejr::sendMessage(string ip, int port, string msg,
                                string sender, string target)
 {

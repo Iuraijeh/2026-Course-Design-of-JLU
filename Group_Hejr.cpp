@@ -29,6 +29,7 @@ bool Group_Hejr::isMember(string userId) const
 }
 
 // ---------- 申请加入 ----------
+// QQ群申请：当前策略允许时加入；课程程序将申请简化为自动通过。
 bool Group_Hejr::applyJoin(string userId)
 {
     // 由当前策略决定是否允许申请（微信群模式拒绝）
@@ -51,6 +52,7 @@ bool Group_Hejr::applyJoin(string userId)
 }
 
 // ---------- 推荐/邀请加入 ----------
+// 群邀请：策略允许且邀请人为群成员时加入，目标用户存在性由平台层校验。
 bool Group_Hejr::inviteJoin(string userId, string inviterId)
 {
     if (!strategy->canInviteJoin())
@@ -78,6 +80,7 @@ bool Group_Hejr::inviteJoin(string userId, string inviterId)
 }
 
 // ---------- 转让群主：保留原有加入顺序 ----------
+// 群主转让：只允许群主转给其他成员，转让不改变成员加入顺序。
 bool Group_Hejr::transferOwnership(string operatorId, string targetId)
 {
     if (operatorId != ownerId)
@@ -98,6 +101,7 @@ bool Group_Hejr::transferOwnership(string operatorId, string targetId)
 }
 
 // ---------- 主动退群 ----------
+// 退群规则：由当前策略判断是否解散；微信群主退群时按加入顺序继任。
 bool Group_Hejr::quitGroup(string userId)
 {
     vector<string>::iterator it =
@@ -143,6 +147,7 @@ bool Group_Hejr::quitGroup(string userId)
 }
 
 // ---------- 挨T ----------
+// 踢人权限：群主可踢其他成员；QQ群管理员只能踢普通成员。
 bool Group_Hejr::kickMember(string operatorId, string targetId)
 {
     if (!isMember(operatorId))
@@ -197,6 +202,7 @@ bool Group_Hejr::kickMember(string operatorId, string targetId)
 }
 
 // ---------- 添加管理员（仅群主，仅QQ群模式） ----------
+// 管理员设置：仅群主且当前策略允许管理员时可设置本群成员。
 bool Group_Hejr::addAdmin(string operatorId, string userId)
 {
     if (operatorId != ownerId)
@@ -258,6 +264,7 @@ bool Group_Hejr::removeAdmin(string operatorId, string userId)
 }
 
 // ---------- 创建临时讨论组（子群，仅QQ群模式） ----------
+// 临时讨论组：群成员在支持该功能的 QQ 模式下创建，创建者首先加入。
 bool Group_Hejr::createSubgroup(string name, string creatorId)
 {
     if (!isMember(creatorId))
@@ -291,6 +298,7 @@ bool Group_Hejr::createSubgroup(string name, string creatorId)
     return true;
 }
 
+// 讨论组成员：群主或管理员添加本群成员，避免重复添加。
 bool Group_Hejr::addSubgroupMember(string name, string operatorId, string userId)
 {
     if (!strategy->canCreateSubgroup())
@@ -326,6 +334,7 @@ bool Group_Hejr::addSubgroupMember(string name, string operatorId, string userId
     return false;
 }
 
+// 讨论组成员：群主或管理员从指定讨论组移除成员。
 bool Group_Hejr::removeSubgroupMember(string name, string operatorId, string userId)
 {
     if (!strategy->canCreateSubgroup())
@@ -414,6 +423,7 @@ void Group_Hejr::showFeature() const
 }
 
 // ---------- 动态切换管理模式（成员数据不变） ----------
+// 策略模式：运行时只更换管理策略对象，群成员数据保持不变。
 void Group_Hejr::setStrategy(GroupStrategy_Hejr* strat)
 {
     string oldName = strategy->getStrategyName();
@@ -455,6 +465,7 @@ void Group_Hejr::loadMember(string userId)
         members.push_back(userId);
 }
 
+// 成员恢复：按文件原有顺序加载成员，供微信群主自动继任使用。
 void Group_Hejr::loadMembers(const vector<string>& userIds)
 {
     members.clear();

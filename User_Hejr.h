@@ -3,12 +3,10 @@
 
 #include <string>
 #include <vector>
+#include <map>
 using namespace std;
 
-// ============================================================
 // 用户基本信息类 User_Hejr
-// 说明：类名后缀 _Hejr 为姓名缩写占位符，请替换为自己的姓名缩写
-// ============================================================
 class User_Hejr
 {
 private:
@@ -18,6 +16,7 @@ private:
     string wechatId;              // 微信独立账号号
     string wechatIdChangedMonth; // 最近一次手动修改月份 YYYY-MM
     string wechatBoundQQ;         // 主动绑定的 QQ 账号号，空值表示未绑定
+    map<string, string> serviceAccounts; // 新服务的账号；关闭服务后仍保留
     string birthday;              // 出生时间  格式 YYYY-MM-DD
     string registerTime;          // 注册时间  格式 YYYY-MM-DD（T龄基准）
     string location;              // 所在地
@@ -50,6 +49,9 @@ public:
     void   setWeChatIdChangedMonth(string month);
     string getWeChatBoundQQ() const;
     void   setWeChatBoundQQ(string account);
+    string getServiceAccount(string serviceType) const;
+    void setServiceAccount(string serviceType, string account);
+    const map<string, string>& getServiceAccounts() const;
 
     string getBirthday() const;
     void   setBirthday(string birth);

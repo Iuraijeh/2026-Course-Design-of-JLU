@@ -1,5 +1,6 @@
 #include "Platform_Hejr.h"
 #include "MessageStore_Hejr.h"
+#include "ServiceRegistry_Hejr.h"
 #include <iostream>
 #include <limits>
 #include <cctype>
@@ -183,6 +184,7 @@ Platform_Hejr::~Platform_Hejr()
 // ============================================================
 // 首次运行初始化测试数据：3 个用户 + 好友关系
 // ============================================================
+// 初始数据：首次没有用户时创建演示账号及好友关系。
 void Platform_Hejr::initData()
 {
     // --- 创建用户 ---
@@ -235,6 +237,7 @@ void Platform_Hejr::initData()
 }
 
 // 以群成员表为准同步用户档案，并将旧版纯数字群号迁移为服务:群号。
+// 群成员同步：以群成员表为准修正用户群列表，并迁移旧格式群号。
 void Platform_Hejr::syncUserGroupsFromStorage()
 {
     vector<User_Hejr>& users = userContainer->getAllUsers();
@@ -341,6 +344,7 @@ void Platform_Hejr::stopMessageWatcher()
     }
 }
 
+// 数据刷新：重新加载用户、群和好友，再重建已开通的服务对象。
 void Platform_Hejr::refreshFromDisk()
 {
     if (currentUser == NULL) return;
@@ -359,7 +363,7 @@ void Platform_Hejr::refreshFromDisk()
         ServiceBase_Hejr* service = serviceContainer->getService(opened[i]);
         if (service != NULL)
         {
-            if (opened[i] == "WeChat") service->setServiceId(currentUser->getWeChatId());
+            service->setServiceId(currentUser->getServiceAccount(opened[i]));
             service->autoLogin();
         }
     }
@@ -394,12 +398,16 @@ bool Platform_Hejr::checkLogin() const
 // ============================================================
 // 登录：一次认证，所有已开通服务自动登录
 // ============================================================
-bool Platform_Hejr::login(string userId, string password, string entryService)
+// 登录联动：先验证身份；选择已开通服务，确认一次后联动登录其他服务。
+//校验入口账号的身份，再根据保存的映射找到对应用户。验证成功后，对该用户已开通的其他服务进行确认并联动登录。
+bool Platform_Hejr::login(string userId, string password, string entryService, bool reopen)
 {
     userId = normalizeAccountNumber(userId);
     userContainer->load("users.txt");
     // 查找用户
     User_Hejr* user = userContainer->findUserById(userId);
+    if (user == NULL && !reopen)
+        user = userContainer->findUserByServiceId(entryService, userId);
     if (user == NULL)
     {
         cout << "[平台] 用户 " << userId << " 不存在。" << endl;
@@ -412,11 +420,43 @@ bool Platform_Hejr::login(string userId, string password, string entryService)
         cout << "[平台] 密码错误，登录失败。" << endl;
         return false;
     }
+    userId = user->getAccountNumber();
 
     vector<string> opened = user->getOpenedServices();
+    if (reopen)
+    {
+        if (!opened.empty())
+        {
+            cout << "[平台] 该账号已有开通的服务，请使用普通登录入口。" << endl;
+            return false;
+        }
+        cout << "[平台] 账号和密码验证通过，请选择一个服务重新开通。" << endl;
+        ServiceRegistry_Hejr::instance().printChoices(true);
+        cout << "请选择（0 返回登录页）: ";
+        int choice = readInt();
+        if (choice == 0)
+        {
+            cout << "[平台] 已取消重新开通，账号数据保持不变。" << endl;
+            return false;
+        }
+        entryService = ServiceRegistry_Hejr::instance().codeAt(choice);
+        if (entryService.empty())
+        {
+            cout << "[平台] 无效服务，未开通任何服务。" << endl;
+            return false;
+        }
+        if (!prepareServiceAccount(*user, entryService)) return false;
+        user->addService(entryService);
+        // 已有微信 ID、绑定信息及修改月份继续保留；首次开通才生成 ID。
+        if (entryService == "WeChat") userContainer->ensureWeChatId(*user);
+        userContainer->save();
+        opened = user->getOpenedServices();
+        cout << "[平台] 已重新开通 " << entryService << "，正在登录。" << endl;
+    }
     if (opened.empty())
     {
-        cout << "[平台] 用户 " << userId << " 尚未开通任何服务。" << endl;
+        cout << "[平台] 用户 " << userId
+             << " 尚未开通任何服务，请在登录页选择 3「重新开通服务并登录」。" << endl;
         return false;
     }
     if (find(opened.begin(), opened.end(), entryService) == opened.end())
@@ -455,8 +495,7 @@ bool Platform_Hejr::login(string userId, string password, string entryService)
     {
         serviceContainer->openService(opened[i]);
         ServiceBase_Hejr* service = serviceContainer->getService(opened[i]);
-        if (service != NULL && opened[i] == "WeChat")
-            service->setServiceId(user->getWeChatId());
+        if (service != NULL) service->setServiceId(user->getServiceAccount(opened[i]));
     }
 
     // 创建好友容器
@@ -505,6 +544,7 @@ bool Platform_Hejr::login(string userId, string password, string entryService)
     return true;
 }
 
+// 注册：校验账号、密码及基本资料，记录注册日期并创建默认服务。
 bool Platform_Hejr::registerUser(string accountNumber, string password,
                                  string passwordConfirmation, string userId,
                                  string birthday, string location)
@@ -607,6 +647,7 @@ bool Platform_Hejr::changeLocation(string location)
     return true;
 }
 
+// 微信账号修改：验证格式、是否重复和本月修改次数，再保存。
 bool Platform_Hejr::changeWeChatId(string newWeChatId)
 {
     if (!checkLogin()) return false;
@@ -645,6 +686,7 @@ bool Platform_Hejr::changeWeChatId(string newWeChatId)
     return true;
 }
 
+// 微信绑定：要求微信和当前账号的 QQ 服务已开通，然后保存绑定关系。
 bool Platform_Hejr::bindWeChatToCurrentQQ()
 {
     if (!checkLogin()) return false;
@@ -722,16 +764,62 @@ void Platform_Hejr::logout()
 // ============================================================
 // 开通服务：同时更新 User_Hejr 和 ServiceContainer
 // ============================================================
+// 服务账号：共享账号沿用平台账号；新独立服务首次填写，关闭后保留。
+bool Platform_Hejr::prepareServiceAccount(User_Hejr& user, const string& serviceType)
+{
+    const ServiceDefinition_Hejr* definition = ServiceRegistry_Hejr::instance().find(serviceType);
+    if (definition == NULL) { cout << "未知服务类型。" << endl; return false; }
+    if (serviceType == "QQ" || serviceType == "WeChat" || serviceType == "Weibo") return true;
+    const auto& accounts = user.getServiceAccounts();
+    if (accounts.find(serviceType) != accounts.end())
+    {
+        cout << "继续使用原 " << serviceType << " 账号号: " << user.getServiceAccount(serviceType) << endl;
+        return true;
+    }
+    if (!definition->independentId)
+    {
+        user.setServiceAccount(serviceType, user.getAccountNumber());
+        return true;
+    }
+    string account;
+    cout << "请设置 " << definition->name << "（" << serviceType
+         << "）独立账号号（6～20位字母、数字或下划线，留空取消）: ";
+    getline(cin, account);
+    if (account.empty()) { cout << "已取消开通服务。" << endl; return false; }
+    if (!isValidWeChatId(account))
+    {
+        cout << "独立账号号格式无效，未开通服务。" << endl;
+        return false;
+    }
+    if (userContainer->isWeChatIdUsed(account))
+    {
+        cout << "该账号号已被使用或保留，请换一个账号号。" << endl;
+        return false;
+    }
+    user.setServiceAccount(serviceType, account);
+    return true;
+}
+
+// 开通服务：准备账号、创建服务对象、恢复对应好友并保存用户数据。
 bool Platform_Hejr::openService(string serviceType)
 {
     if (!checkLogin()) return false;
+    if (currentUser->isServiceOpened(serviceType))
+    {
+        cout << "该服务已开通。" << endl;
+        return false;
+    }
+    if (!prepareServiceAccount(*currentUser, serviceType)) return false;
     if (!serviceContainer->openService(serviceType)) return false;
     currentUser->addService(serviceType);
     if (serviceType == "WeChat") userContainer->ensureWeChatId(*currentUser);
     ServiceBase_Hejr* service = serviceContainer->getService(serviceType);
     if (service != NULL)
     {
-        if (serviceType == "WeChat") service->setServiceId(currentUser->getWeChatId());
+        service->setServiceId(currentUser->getServiceAccount(serviceType));
+        if (friendContainer != NULL)
+            for (const Friend_Hejr& friendInfo : friendContainer->getAllFriends())
+                if (friendInfo.hasServiceType(serviceType)) service->loadFriend(friendInfo.getFriendId());
         service->autoLogin();
     }
     userContainer->save();
@@ -741,6 +829,7 @@ bool Platform_Hejr::openService(string serviceType)
 // ============================================================
 // 关闭服务
 // ============================================================
+// 关闭服务：移除当前服务及开通标记，最后一个也允许关闭。
 bool Platform_Hejr::closeService(string serviceType)
 {
     if (!checkLogin()) return false;
@@ -748,9 +837,12 @@ bool Platform_Hejr::closeService(string serviceType)
     if (!serviceContainer->closeService(serviceType)) return false;
     currentUser->removeService(serviceType);
     userContainer->save();
+    if (currentUser->getOpenedServices().empty())
+        cout << "[平台] 已关闭全部服务；退出后可在登录页选择 3「重新开通服务并登录」。" << endl;
     return true;
 }
 
+// 好友账号解析：将服务账号或微信绑定号转换为唯一平台账号。
 string Platform_Hejr::resolveFriendAccount(const string& input,
                                            const string& serviceType) const
 {
@@ -775,12 +867,8 @@ string Platform_Hejr::resolveFriendAccount(const string& input,
             }
         }
     }
-    else
-    {
-        user = userContainer->findUserById(input);
-        if (user == NULL && serviceType.empty())
-            user = userContainer->findUserByWeChatId(input);
-    }
+    else if (serviceType.empty()) user = userContainer->findUserByAnyServiceId(input);
+    else user = userContainer->findUserByServiceId(serviceType, input);
     if (user == NULL || (!serviceType.empty() &&
         !user->isServiceOpened(serviceType))) return "";
     return user->getAccountNumber();
@@ -789,6 +877,7 @@ string Platform_Hejr::resolveFriendAccount(const string& input,
 // ============================================================
 // 跨服务好友：从 fromService 的好友列表中取人加入 toService
 // ============================================================
+// 跨服务推荐：校验本人服务、来源好友和对方目标服务，再更新好友记录。
 bool Platform_Hejr::addFriendFromService(string fromServiceType,
                                         string friendId,
                                         string toServiceType)
@@ -816,6 +905,20 @@ bool Platform_Hejr::addFriendFromService(string fromServiceType,
     {
         cout << "[平台] " << fromServiceType << " 服务中无好友 "
              << friendId << "，无法推荐。" << endl;
+        return false;
+    }
+
+    // 在修改任何好友关系之前，确认对方存在并已开通目标服务。
+    User_Hejr* targetUser = userContainer->findUserById(friendId);
+    if (targetUser == NULL)
+    {
+        cout << "[平台] 对方账号不存在，无法推荐。" << endl;
+        return false;
+    }
+    if (!targetUser->isServiceOpened(toServiceType))
+    {
+        cout << "[平台] 对方尚未开通 " << toServiceType
+             << " 服务，无法推荐，现有好友关系保持不变。" << endl;
         return false;
     }
 
@@ -852,6 +955,7 @@ void Platform_Hejr::showGroupFeature(string groupId)
 // ============================================================
 // 动态切换群管理模式（成员数据不变）
 // ============================================================
+// 群模式切换：替换群对象持有的策略指针并保存，成员向量本身不改变。
 bool Platform_Hejr::transformGroup(string groupId, string newStrategyType)
 {
     Group_Hejr* g = groupContainer->findByGroupId(groupId);
@@ -876,6 +980,7 @@ bool Platform_Hejr::transformGroup(string groupId, string newStrategyType)
 // ============================================================
 // 主循环
 // ============================================================
+// 主菜单：先处理登录、注册及服务恢复，登录后分发各业务子菜单。
 void Platform_Hejr::run()
 {
     while (running)
@@ -891,6 +996,7 @@ void Platform_Hejr::run()
         cout << "========================================" << endl;
         cout << "  1. 登录" << endl;
         cout << "  2. 注册" << endl;
+        cout << "  3. 重新开通服务并登录（未开通任何服务的账号）" << endl;
         cout << "  0. 退出" << endl;
         cout << "请选择: ";
         int action = readInt();
@@ -901,22 +1007,31 @@ void Platform_Hejr::run()
         }
         if (action == 1)
         {
-            cout << "请输入账号号: ";
+            cout << "请输入平台账号号或所选服务账号号: ";
             getline(cin, accountNumber);
             cout << "请输入密码: ";
             getline(cin, password);
-            cout << "选择登录服务: 1.QQ  2.WeChat  3.Weibo: ";
+            cout << "选择登录服务:" << endl;
+            ServiceRegistry_Hejr::instance().printChoices();
+            cout << "请选择: ";
             int serviceChoice = readInt();
-            string entryService = serviceChoice == 1 ? "QQ" :
-                                  serviceChoice == 2 ? "WeChat" :
-                                  serviceChoice == 3 ? "Weibo" : "";
+            string entryService = ServiceRegistry_Hejr::instance().codeAt(serviceChoice);
             if (entryService.empty())
             {
                 cout << "无效服务，请重新登录。" << endl;
                 continue;
             }
             if (!login(accountNumber, password, entryService))
-                cout << "认证未通过，请重新登录。" << endl;
+                cout << "登录未完成，请重新选择入口。" << endl;
+        }
+        else if (action == 3)
+        {
+            cout << "请输入平台账号号: ";
+            getline(cin, accountNumber);
+            cout << "请输入密码: ";
+            getline(cin, password);
+            if (!login(accountNumber, password, "", true))
+                cout << "未进入系统，已返回登录页。" << endl;
         }
         else if (action == 2)
         {
@@ -1017,6 +1132,117 @@ void Platform_Hejr::run()
 // ============================================================
 // 好友管理子菜单
 // ============================================================
+// 好友服务关系：逐个增加或移除；最后一个服务移除后删除好友条目。
+bool Platform_Hejr::changeFriendService(string friendId, string serviceType, bool adding)
+{
+    if (!checkLogin()) return false;
+    if (ServiceRegistry_Hejr::instance().find(serviceType) == NULL)
+    {
+        cout << "无效服务，原好友关系保持不变。" << endl;
+        return false;
+    }
+    Friend_Hejr* friendInfo = friendContainer->findFriend(friendId);
+    if (friendInfo == NULL)
+    {
+        cout << "好友不存在。" << endl;
+        return false;
+    }
+    ServiceBase_Hejr* service = serviceContainer->getService(serviceType);
+    if (adding)
+    {
+        if (service == NULL)
+        {
+            cout << "你尚未开通 " << serviceType << " 服务，原好友关系保持不变。" << endl;
+            return false;
+        }
+        User_Hejr* target = userContainer->findUserById(friendId);
+        if (target == NULL)
+        {
+            cout << "对方账号不存在，无法添加服务关系。" << endl;
+            return false;
+        }
+        if (!target->isServiceOpened(serviceType))
+        {
+            cout << "对方尚未开通 " << serviceType << " 服务，原好友关系保持不变。" << endl;
+            return false;
+        }
+        if (!friendInfo->addServiceType(serviceType))
+        {
+            cout << "该好友已属于 " << serviceType << "，无需重复添加。" << endl;
+            return false;
+        }
+        service->addFriend(friendId);
+        cout << "已添加 " << serviceType << " 好友关系，其他服务关系和备注保持不变。" << endl;
+    }
+    else
+    {
+        if (!friendInfo->removeServiceType(serviceType))
+        {
+            cout << "该好友没有 " << serviceType << " 关系，无需移除。" << endl;
+            return false;
+        }
+        // 服务已关闭时也允许清理原有关系；不影响其他服务或聊天记录。
+        if (service != NULL) service->removeFriend(friendId);
+        if (friendInfo->getServiceTypes().empty())
+        {
+            friendContainer->removeFriend(friendId);
+            currentUser->removeFriendId(friendId);
+            userContainer->save();
+            cout << "最后一个服务关系已移除，该好友已从列表删除，聊天记录保留。" << endl;
+        }
+        else
+            cout << "已移除 " << serviceType << " 好友关系，其他服务关系和备注保持不变。" << endl;
+    }
+    friendContainer->save();
+    return true;
+}
+
+// 修改好友入口：分别选择修改备注、添加服务关系或移除服务关系。
+void Platform_Hejr::editFriend()
+{
+    string fid;
+    cout << "请输入好友平台账号号或独立服务账号号: ";
+    getline(cin, fid);
+    string resolved = resolveFriendAccount(fid, "");
+    if (!resolved.empty()) fid = resolved;
+    Friend_Hejr* friendInfo = friendContainer->findFriend(fid);
+    if (friendInfo == NULL)
+    {
+        cout << "好友不存在。" << endl;
+        return;
+    }
+    friendInfo->printInfo();
+    cout << "  1. 修改备注" << endl;
+    cout << "  2. 添加一个服务关系" << endl;
+    cout << "  3. 移除一个服务关系" << endl;
+    cout << "  0. 返回好友管理" << endl;
+    cout << "请选择: ";
+    int action = readInt();
+    if (action == 0) return;
+    if (action == 1)
+    {
+        string remark;
+        cout << "请输入新备注名（留空可清除备注）: ";
+        getline(cin, remark);
+        if (friendContainer->modifyFriendRemark(fid, remark)) friendContainer->save();
+        return;
+    }
+    if (action != 2 && action != 3)
+    {
+        cout << "无效选项，未修改好友信息。" << endl;
+        return;
+    }
+    cout << "选择要" << (action == 2 ? "添加" : "移除")
+         << "的服务:" << endl;
+    ServiceRegistry_Hejr::instance().printChoices(true);
+    cout << "请选择: ";
+    int choice = readInt();
+    if (choice == 0) return;
+    string service = ServiceRegistry_Hejr::instance().codeAt(choice);
+    changeFriendService(fid, service, action == 2);
+}
+
+// 好友菜单：添加、删除、修改、列出好友和查询两个服务的共同好友。
 void Platform_Hejr::friendMenu()
 {
     if (!checkLogin()) return;
@@ -1027,7 +1253,7 @@ void Platform_Hejr::friendMenu()
         refreshFromDisk();
         cout << "\n--- 好友管理 ---" << endl;
         cout << "  1. 添加好友" << endl;
-        cout << "  2. 删除好友" << endl;
+        cout << "  2. 删除好友（所有服务关系）" << endl;
         cout << "  3. 修改好友信息" << endl;
         cout << "  4. 查询好友列表" << endl;
         cout << "  5. 查询两服务共同好友" << endl;
@@ -1041,11 +1267,11 @@ void Platform_Hejr::friendMenu()
         case 1:
         {
             string fid, remark, svcType;
-            cout << "请输入好友账号号（微信可输入微信账号号）: ";
+            cout << "请输入好友账号号（独立服务请填写该服务账号号）: ";
             getline(cin, fid);
             cout << "请输入备注名: ";
             getline(cin, remark);
-            cout << "来源服务 (QQ/WeChat/Weibo): ";
+            cout << "来源服务 (" << ServiceRegistry_Hejr::instance().serviceNames() << "): ";
             getline(cin, svcType);
 
             ServiceBase_Hejr* service = serviceContainer->getService(svcType);
@@ -1080,7 +1306,7 @@ void Platform_Hejr::friendMenu()
         case 2:
         {
             string fid;
-            cout << "请输入要删除的好友账号号（也可输入微信账号号）: ";
+            cout << "请输入要删除的好友平台账号号或独立服务账号号: ";
             getline(cin, fid);
             string resolved = resolveFriendAccount(fid, "");
             if (!resolved.empty()) fid = resolved;
@@ -1104,44 +1330,17 @@ void Platform_Hejr::friendMenu()
             break;
         }
         case 3:
-        {
-            string fid, remark, svcType;
-            cout << "请输入好友账号号（也可输入微信账号号）: ";
-            getline(cin, fid);
-            cout << "请输入新备注名: ";
-            getline(cin, remark);
-            cout << "请输入新来源服务: ";
-            getline(cin, svcType);
-            string resolved = resolveFriendAccount(fid, "");
-            if (!resolved.empty()) fid = resolved;
-            Friend_Hejr* friendInfo = friendContainer->findFriend(fid);
-            if (friendInfo != NULL)
-            {
-                vector<string> oldTypes = friendInfo->getServiceTypes();
-                if (friendContainer->modifyFriend(fid, remark, svcType))
-                {
-                    for (size_t i = 0; i < oldTypes.size(); ++i)
-                    {
-                        ServiceBase_Hejr* service = serviceContainer->getService(oldTypes[i]);
-                        if (service != NULL) service->removeFriend(fid);
-                    }
-                    ServiceBase_Hejr* service = serviceContainer->getService(svcType);
-                    if (service != NULL) service->addFriend(fid);
-                    friendContainer->save();
-                }
-            }
-            else cout << "好友不存在。" << endl;
+            editFriend();
             break;
-        }
         case 4:
             friendContainer->listAll();
             break;
         case 5:
         {
             string svc1, svc2;
-            cout << "请输入第一个服务 (QQ/WeChat/Weibo): ";
+            cout << "请输入第一个服务 (" << ServiceRegistry_Hejr::instance().serviceNames() << "): ";
             getline(cin, svc1);
-            cout << "请输入第二个服务 (QQ/WeChat/Weibo): ";
+            cout << "请输入第二个服务 (" << ServiceRegistry_Hejr::instance().serviceNames() << "): ";
             getline(cin, svc2);
 
             ServiceBase_Hejr* s1 = serviceContainer->getService(svc1);
@@ -1171,6 +1370,7 @@ void Platform_Hejr::friendMenu()
 // ============================================================
 // 群管理子菜单
 // ============================================================
+// 正式建群：选择所属服务和至少一位好友，创建者成为群主。
 void Platform_Hejr::createGroupFromFriends()
 {
     cout << "选择建群服务: 1.QQ  2.WeChat: ";
@@ -1246,6 +1446,7 @@ void Platform_Hejr::createGroupFromFriends()
          << "，群主: " << group->getOwnerId() << "，共 " << members.size() << " 人。" << endl;
 }
 
+// 群菜单：选择 QQ 或微信及群号，分发入群、退群、管理和讨论组操作。
 void Platform_Hejr::groupMenu()
 {
     if (!checkLogin()) return;
@@ -1432,6 +1633,7 @@ void Platform_Hejr::groupMenu()
 // ============================================================
 // 账号设置子菜单
 // ============================================================
+// 账号设置：修改昵称、密码、微信账号和绑定关系及基本资料。
 void Platform_Hejr::accountMenu()
 {
     if (!checkLogin()) return;
@@ -1534,6 +1736,7 @@ void Platform_Hejr::accountMenu()
 // ============================================================
 // 开通服务管理子菜单
 // ============================================================
+// 服务管理：从服务注册表生成选项，开通、关闭和查看服务。
 void Platform_Hejr::serviceMenu()
 {
     if (!checkLogin()) return;
@@ -1546,8 +1749,8 @@ void Platform_Hejr::serviceMenu()
         cout << "  1. 开通服务" << endl;
         cout << "  2. 关闭服务" << endl;
         cout << "  3. 查看已开通服务" << endl;
-        cout << "  4. 了解未来产品：共用 QQ 账号号" << endl;
-        cout << "  5. 了解未来产品：独立账号号" << endl;
+        cout << "  4. 查看共用 QQ 账号号的可用服务" << endl;
+        cout << "  5. 查看使用独立账号号的可用服务" << endl;
         cout << "  0. 返回主菜单" << endl;
         cout << "请选择: ";
 
@@ -1557,28 +1760,24 @@ void Platform_Hejr::serviceMenu()
         {
         case 1:
         {
-            cout << "可开通: 1.QQ  2.WeChat  3.Weibo" << endl;
+            cout << "可开通的服务:" << endl;
+            ServiceRegistry_Hejr::instance().printChoices();
             cout << "请选择: ";
             int svc = readInt();
-            string svcType;
-            if (svc == 1)      svcType = "QQ";
-            else if (svc == 2) svcType = "WeChat";
-            else if (svc == 3) svcType = "Weibo";
-            else { cout << "无效选择。" << endl; break; }
+            string svcType = ServiceRegistry_Hejr::instance().codeAt(svc);
+            if (svcType.empty()) { cout << "无效选择。" << endl; break; }
 
             openService(svcType);
             break;
         }
         case 2:
         {
-            cout << "可关闭: 1.QQ  2.WeChat  3.Weibo" << endl;
+            cout << "选择要关闭的服务:" << endl;
+            ServiceRegistry_Hejr::instance().printChoices();
             cout << "请选择: ";
             int svc = readInt();
-            string svcType;
-            if (svc == 1)      svcType = "QQ";
-            else if (svc == 2) svcType = "WeChat";
-            else if (svc == 3) svcType = "Weibo";
-            else { cout << "无效选择。" << endl; break; }
+            string svcType = ServiceRegistry_Hejr::instance().codeAt(svc);
+            if (svcType.empty()) { cout << "无效选择。" << endl; break; }
 
             closeService(svcType);
             break;
@@ -1590,10 +1789,10 @@ void Platform_Hejr::serviceMenu()
                     ? "未绑定" : currentUser->getWeChatBoundQQ()) << endl;
             break;
         case 4:
-            cout << "未来的微X产品可与 QQ、微博一样共用平台账号号。当前仅展示类型，尚未创建产品。" << endl;
-            break;
         case 5:
-            cout << "未来的微X产品可与微信一样使用独立账号号，并由用户主动关联 QQ。当前仅展示类型，尚未创建产品。" << endl;
+            for (const ServiceDefinition_Hejr& definition : ServiceRegistry_Hejr::instance().all())
+                if (definition.independentId == (choice == 5))
+                    cout << "  " << definition.code << "（" << definition.name << "）" << endl;
             break;
         case 0:
             back = true;
@@ -1608,6 +1807,7 @@ void Platform_Hejr::serviceMenu()
 // ============================================================
 // 跨服务好友子菜单
 // ============================================================
+// 跨服务好友入口：输入来源、目标服务和好友账号后调用推荐接口。
 void Platform_Hejr::crossServiceMenu()
 {
     if (!checkLogin()) return;
@@ -1628,11 +1828,11 @@ void Platform_Hejr::crossServiceMenu()
         case 1:
         {
             string fromSvc, toSvc, fid;
-            cout << "来源服务 (QQ/WeChat/Weibo): ";
+            cout << "来源服务 (" << ServiceRegistry_Hejr::instance().serviceNames() << "): ";
             getline(cin, fromSvc);
-            cout << "目标服务 (QQ/WeChat/Weibo): ";
+            cout << "目标服务 (" << ServiceRegistry_Hejr::instance().serviceNames() << "): ";
             getline(cin, toSvc);
-            cout << "请输入好友账号号（微信可输入微信账号号）: ";
+            cout << "请输入好友账号号（独立服务可填写该服务账号号）: ";
             getline(cin, fid);
             addFriendFromService(fromSvc, fid, toSvc);
             break;
@@ -1650,6 +1850,7 @@ void Platform_Hejr::crossServiceMenu()
 // ============================================================
 // 群特色展示与动态变换子菜单
 // ============================================================
+// 策略演示入口：查看群特色，或在 QQ 和微信管理模式之间切换。
 void Platform_Hejr::groupFeatureMenu()
 {
     bool back = false;
@@ -1698,6 +1899,7 @@ void Platform_Hejr::groupFeatureMenu()
 // ============================================================
 // 账号单聊与群聊：与网页共用 messages.txt。
 // ============================================================
+// 消息中心：按平台账号或群号查看历史、发送消息并写入消息文件。
 void Platform_Hejr::chatMenu()
 {
     if (!checkLogin()) return;
@@ -1721,6 +1923,8 @@ void Platform_Hejr::chatMenu()
         {
             cout << "好友账号: ";
             getline(cin, target);
+            string resolved = resolveFriendAccount(target, "");
+            if (!resolved.empty()) target = resolved;
         }
         else target = readGroupKey();
         const string account = currentUser->getAccountNumber();
@@ -1768,6 +1972,7 @@ void Platform_Hejr::chatMenu()
 // ============================================================
 // TCP 点对点聊天子菜单（选做）
 // ============================================================
+// TCP 演示入口：查看本机地址和接收状态，或发送点对点消息。
 void Platform_Hejr::tcpChatMenu()
 {
     bool back = false;

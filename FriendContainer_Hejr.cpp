@@ -24,6 +24,7 @@ FriendContainer_Hejr::~FriendContainer_Hejr()
 }
 
 // ---------- 添加好友 ----------
+// 好友添加：已有好友时合并服务类型；新好友加入当前用户好友容器。
 bool FriendContainer_Hejr::addFriend(const Friend_Hejr& f)
 {
     Friend_Hejr* existing = findFriend(f.getFriendId());
@@ -60,10 +61,9 @@ bool FriendContainer_Hejr::removeFriend(string friendId)
     return false;
 }
 
-// ---------- 修改好友信息 ----------
-bool FriendContainer_Hejr::modifyFriend(string friendId,
-                                       string newRemark,
-                                       string newServiceType)
+// ---------- 仅修改备注，保留所有服务关系 ----------
+// 好友备注：只修改备注并校验分隔符，不改动现有服务关系。
+bool FriendContainer_Hejr::modifyFriendRemark(string friendId, string newRemark)
 {
     Friend_Hejr* f = findFriend(friendId);
     if (f == NULL)
@@ -71,9 +71,13 @@ bool FriendContainer_Hejr::modifyFriend(string friendId,
         cout << "[好友容器] 好友 " << friendId << " 不存在，无法修改。" << endl;
         return false;
     }
+    if (newRemark.find_first_of("|\r\n") != string::npos)
+    {
+        cout << "备注不能包含 | 或换行符，原备注保持不变。" << endl;
+        return false;
+    }
     f->setRemark(newRemark);
-    f->setServiceType(newServiceType);
-    cout << "[好友容器] 已修改好友 " << friendId << " 的信息。" << endl;
+    cout << "[好友容器] 已修改好友 " << friendId << " 的备注。" << endl;
     return true;
 }
 
@@ -109,6 +113,7 @@ void FriendContainer_Hejr::listAll() const
 }
 
 // ---------- 从文件加载 ----------
+// 好友文件读取：从当前用户的 friends_账号.txt 恢复好友和服务类型。
 void FriendContainer_Hejr::load()
 {
     ifstream fin(filename.c_str());
@@ -141,6 +146,7 @@ void FriendContainer_Hejr::load()
 }
 
 // ---------- 保存到文件 ----------
+// 好友文件保存：将账号、备注和服务列表写入当前用户的好友文件。
 void FriendContainer_Hejr::save() const
 {
     ofstream fout(filename.c_str());

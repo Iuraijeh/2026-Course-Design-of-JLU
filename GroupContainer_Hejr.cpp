@@ -77,6 +77,7 @@ GroupStrategy_Hejr* GroupContainer_Hejr::getStrategy(string type)
 }
 
 // ---------- 创建旧版预设群并补齐两个服务的群号 ----------
+// 答辩定位：预设群：初始化 QQ 和微信各 1001 至 1006 号群。
 void GroupContainer_Hejr::initDefaultGroups()
 {
     // 保留旧版群名与群主；旧版按当前管理模式归入 QQ 或微信。
@@ -130,6 +131,7 @@ void GroupContainer_Hejr::addGroup(Group_Hejr* g)
 }
 
 // ---------- 按群号查找 ----------
+// 答辩定位：创建群：两个服务分别从 1007 起分配群号，并加入创建者和所选好友。
 Group_Hejr* GroupContainer_Hejr::createGroup(string service, string name,
                                            string owner,
                                            const vector<string>& selectedMembers)
@@ -216,6 +218,7 @@ void GroupContainer_Hejr::listAll() const
 }
 
 // ---------- 从文件加载 ----------
+// 答辩定位：群数据读取：恢复服务与群号、群主、策略、成员顺序、管理员和讨论组。
 void GroupContainer_Hejr::load(string fname)
 {
     ifstream fin(fname.c_str());
@@ -348,6 +351,7 @@ void GroupContainer_Hejr::load(string fname)
 }
 
 // ---------- 保存到文件 ----------
+// 答辩定位：群数据保存：写入下一个群号及每个群的策略、成员和讨论组。
 void GroupContainer_Hejr::save(string fname) const
 {
     ofstream fout(fname.c_str());
